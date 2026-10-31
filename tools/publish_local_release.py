@@ -6,11 +6,31 @@ from pathlib import Path
 import shutil
 import subprocess
 import sys
+import time
 from package_release import ROOT, properties
 
 
 def run(*args, cwd=ROOT):
     return subprocess.check_output(list(map(str, args)), cwd=cwd, text=True, encoding='utf-8').strip()
+
+
+def ensure_pages(repo):
+    for attempt in range(5):
+        page = subprocess.run(['gh', 'api', f'repos/{repo}/pages'], capture_output=True, text=True)
+        if page.returncode == 0:
+            current = json.loads(page.stdout)
+            if current.get('build_type') != 'legacy' or current.get('source', {}).get('branch') != 'gh-pages' or current.get('source', {}).get('path') != '/':
+                raise SystemExit('Pages uses a different publishing source. Inspect the configuration before changing it.')
+            return
+        if '404' not in page.stderr:
+            raise SystemExit('Could not inspect Pages settings; configure the gh-pages source manually.')
+        created = subprocess.run(['gh', 'api', '--method', 'POST', f'repos/{repo}/pages', '-f', 'build_type=legacy',
+            '-f', 'source[branch]=gh-pages', '-f', 'source[path]=/'], capture_output=True, text=True)
+        if created.returncode != 0 and '409' not in created.stderr:
+            raise SystemExit('Could not enable Pages: ' + created.stderr)
+        # Pushing gh-pages can also auto-enable Pages. Re-read after a 404 -> 409 race.
+        time.sleep(2)
+    raise SystemExit('Pages settings have not propagated yet. Inspect the Pages deployment before retrying.')
 
 
 def main():
@@ -71,16 +91,7 @@ def main():
     run('git', 'commit', '-m', 'Publish DualKey IME ' + tag, cwd=checkout)
     run('git', 'push', 'origin', 'gh-pages', cwd=checkout)
 
-    page = subprocess.run(['gh', 'api', f'repos/{repo}/pages'], capture_output=True, text=True)
-    if page.returncode != 0:
-        if '404' not in page.stderr:
-            raise SystemExit('Could not inspect Pages settings; configure the gh-pages source manually.')
-        run('gh', 'api', '--method', 'POST', f'repos/{repo}/pages', '-f', 'build_type=legacy',
-            '-f', 'source[branch]=gh-pages', '-f', 'source[path]=/')
-    else:
-        current = json.loads(page.stdout)
-        if current.get('build_type') != 'legacy' or current.get('source', {}).get('branch') != 'gh-pages':
-            raise SystemExit('Pages uses a different publishing source. Inspect the configuration before changing it.')
+    ensure_pages(repo)
     print('Release published; GitHub Pages build requested:', config['websiteUrl'])
     print('The private signing key stayed on this PC. Verify the public site after the Pages deployment succeeds.')
 
