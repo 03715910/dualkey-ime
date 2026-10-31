@@ -43,7 +43,7 @@ class DeviceInputTest {
         }
         assertEquals(component,android.provider.Settings.Secure.getString(instrumentation.targetContext.contentResolver,"default_input_method"))
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
-        runBlocking { app.settings.awaitLoaded(); app.settings.set(Prefs.initialEnglish,false); app.settings.set(Prefs.hardwarePolicy,"AUTO"); app.settings.set(Prefs.shortcut,true); app.settings.set(Prefs.englishPrediction,true); app.settings.set(Prefs.numberRow,true) }
+        runBlocking { app.settings.awaitLoaded(); app.settings.set(Prefs.initialEnglish,false); app.settings.set(Prefs.hardwarePolicy,"AUTO"); app.settings.set(Prefs.shortcut,true); app.settings.set(Prefs.englishPrediction,true); app.settings.set(Prefs.numberRow,true); app.settings.set(Prefs.keyHeight,40); app.settings.set(Prefs.heightPercent,100) }
         activity=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
         await("editor ready") { var found=false; main { found=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; found }
         main {
@@ -141,6 +141,40 @@ class DeviceInputTest {
         touch(rect("C")); touch(rect("D")); assertEquals("helAbCD",inputText())
         touch(rect("⇪")); touch(rect("e")); assertEquals("helAbCDe",inputText())
     }
+    @Test fun compactLayoutUsesFourRowsAndShortDigits() {
+        val density=activity.resources.displayMetrics.density
+        val a=rect("あ行"); val ka=rect("か行"); val sa=rect("さ行"); val wa=rect("わ行")
+        val digit=rect("1"); val delete=rect("⌫")
+        assertTrue("Digits need a shorter row than kana",digit.height()<a.height())
+        assertTrue("Three kana keys fit between the side controls",a.right<=ka.left && ka.right<=sa.left && sa.right<=delete.left)
+        assertEquals("わ aligns with the central column",ka.left,wa.left)
+        assertTrue("Four kana rows only",wa.bottom-a.top<=4*(a.height()+4*density))
+        val landscape=activity.resources.configuration.orientation==android.content.res.Configuration.ORIENTATION_LANDSCAPE
+        val screen=if (android.os.Build.VERSION.SDK_INT>=30) activity.windowManager.currentWindowMetrics.bounds.height() else activity.resources.displayMetrics.heightPixels
+        assertTrue("Leave room above the keyboard: ${imeHeight()} of $screen pixels",imeHeight()<=screen*(if (landscape) .75 else .40))
+        if (InstrumentationRegistry.getArguments().getString("capturePreview")=="true") {
+            letters("KYOU"); key(KeyEvent.KEYCODE_SPACE)
+            await("preview candidates") { findNode { it.text?.toString()=="今日" }!=null }
+            val folder=java.io.File(instrumentation.targetContext.getExternalFilesDir(null),"preview").apply { mkdirs() }
+            val screenshot=instrumentation.uiAutomation.takeScreenshot()
+            java.io.File(folder,"keyboard-compact.png").outputStream().use { screenshot.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }
+            screenshot.recycle()
+        }
+    }
+    @Test fun sideArrowsSelectCandidatesAndMoveTheCursor() {
+        letters("KYOU"); key(KeyEvent.KEYCODE_SPACE); assertEquals("今日",inputText())
+        touch(rect("▶")); assertEquals("京都",inputText())
+        touch(rect("◀")); assertEquals("今日",inputText())
+        touch(rect("↵")); touch(rect("◀")); touch(rect("あ行")); touch(rect("↵"))
+        await("cursor insertion") { inputText()=="今あ日" }
+    }
+    @Test fun bottomRowHandlesSmallVoicedKanaAndPunctuation() {
+        touch(rect("か行")); touch(rect("小゛゜"))
+        touch(rect("は行")); touch(rect("小゛゜")); touch(rect("小゛゜"))
+        touch(rect("た行"),dy=-100); touch(rect("小゛゜"))
+        touch(rect("、行")); touch(rect("、行"),dx=-100); touch(rect("↵"))
+        assertEquals("がぱっ、。",inputText())
+    }
     @Test fun physicalEnglishHonorsShiftAndCaps() {
         key(KeyEvent.KEYCODE_EISU)
         key(KeyEvent.KEYCODE_A); key(KeyEvent.KEYCODE_A,KeyEvent.META_SHIFT_ON); key(KeyEvent.KEYCODE_A,KeyEvent.META_CAPS_LOCK_ON)
@@ -149,7 +183,7 @@ class DeviceInputTest {
     }
     @Test fun passwordDisablesSuggestionsAndTranslation() {
         main { editor.inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; editor.setText(""); activity.getSystemService(InputMethodManager::class.java).restartInput(editor) }
-        SystemClock.sleep(350)
+        await("password input mode ready") { findNode { it.text?.toString()=="EN" }!=null && findNode { it.text?.toString()=="翻訳" }==null }
         letters("secret"); assertEquals("secret",inputText())
         var composingStart=0; main { composingStart=android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text) }
         assertEquals(-1,composingStart)

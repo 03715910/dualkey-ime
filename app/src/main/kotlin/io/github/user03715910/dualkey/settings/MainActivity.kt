@@ -133,7 +133,7 @@ class MainActivity : AppCompatActivity() {
         toggle("初期モードを英語にする",Prefs.initialEnglish,s.initialEnglish)
         toggle("数字専用行を表示",Prefs.numberRow,s.numberRow)
         slider("フリック開始距離（dp）",Prefs.flickDp,s.flickDp,8,64)
-        slider("キーの高さ（dp）",Prefs.keyHeight,s.keyHeight,36,80)
+        slider("キーの高さ（dp）",Prefs.keyHeight,s.keyHeight,32,80)
         slider("キーボード全体の倍率（%）",Prefs.heightPercent,s.heightPercent,70,140)
         text("横画面などでは画面に収まる高さへ自動調整します。")
         toggle("キー操作時の振動",Prefs.vibration,s.vibration)

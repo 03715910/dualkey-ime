@@ -2,7 +2,7 @@
     android:id="@+id/ime_root" android:layout_width="match_parent" android:layout_height="wrap_content"
     android:orientation="vertical" android:padding="4dp">
     <LinearLayout android:id="@+id/toolbar" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" />
-    <HorizontalScrollView android:layout_width="match_parent" android:layout_height="48dp" android:fillViewport="true">
+    <HorizontalScrollView android:id="@+id/candidate_scroll" android:layout_width="match_parent" android:layout_height="32dp" android:fillViewport="true" android:scrollbars="none">
         <LinearLayout android:id="@+id/candidate_strip" android:orientation="horizontal" android:layout_width="wrap_content" android:layout_height="match_parent" />
     </HorizontalScrollView>
     <LinearLayout android:id="@+id/number_row" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" />

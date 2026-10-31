@@ -18,8 +18,11 @@ class FlickKey(context: Context, private val values: List<String>, private val t
     private var popup: PopupWindow? = null
     private var preview: TextView? = null
     init {
-        text = values[0] + "\n" + values.drop(1).joinToString(" ")
-        textSize = 17f
+        // Keep the resting key legible and compact; directions appear while touching.
+        text = values[0]
+        textSize = 22f
+        includeFontPadding = false
+        setSingleLine(true)
         gravity = Gravity.CENTER
         isClickable = true
         contentDescription = "${values[0]}行。左${values[1]}、上${values[2]}、右${values[3]}、下${values[4]}"

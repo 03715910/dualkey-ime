@@ -229,6 +229,15 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val cycle=cycles.firstOrNull { last in it } ?: return
         invalidateTranslation(); composer.replace(s.dropLast(1)+cycle[(cycle.indexOf(last)+1)%cycle.length]); resetConversion(); syncComposition()
     }
+    private fun moveCursor(step: Int) {
+        invalidateTranslation()
+        if (converting && candidates.isNotEmpty()) {
+            selected=(selected+step+candidates.size)%candidates.size; syncComposition()
+        } else {
+            commitComposition(); finishEnglish()
+            sendDownUpKeyEvents(if (step<0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT)
+        }
+    }
     private fun onScreenKey(key: String) {
         when (key) {
             "mode" -> switchMode()
@@ -242,6 +251,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             "space" -> space()
             "enter" -> enter()
             "delete" -> delete()
+            "cursor_left" -> moveCursor(-1)
+            "cursor_right" -> moveCursor(1)
             "modify" -> modifyKana()
             "punctuation" -> type(if (composer.text.endsWith("、")) "。" else "、")
             "shift" -> {

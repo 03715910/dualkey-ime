@@ -1,5 +1,16 @@
 # テスト結果（2026-10-31）
 
+## 0.1.2：配置・大きさの変更
+
+- 360dp幅（720×1746px、密度320）の専用AVDで入力テスト14件成功。従来の入力・Shift/Caps・候補操作・表示切替・パスワード・翻訳に加え、4段配置、短い数字行、左右キーでの候補とカーソル移動、小文字・濁半濁点・句読点を確認しました。
+- 縦画面はIMEの高さが画面の40%以内であることを確認。文字サイズ1.3倍の同じ配置試験も成功しました。
+- 横画面（1746×720px）の配置試験も成功。数字がかなと同じ高さになる問題を修正し、数字をさらに低く保ったうえで4段全体が収まることを確認しました。
+- 標準・拡大文字・横画面の実際の画面は`output/keyboard-preview-0.1.2.png`、`output/keyboard-large-font-0.1.2.png`、`output/keyboard-landscape-0.1.2.png`です。API35エミュレーターのデバッグ版であり、Samsung実機の画像ではありません。
+- Debug・署名Release・テストAPKのビルド、JVM11件・Web9件、Release Lintのエラーなしを確認しました。
+- 最初の端末試験はSystem UIの応答停止により中断しました。その後、パスワード欄の切替を固定350ms待機から実際のIME表示切替完了の待機へ変更し、14件を再実行して成功しました。実行記録は`compact-input-final.log`、`compact-large-font-test.log`、`compact-landscape-final.log`、`compact-portrait-final.log`です。
+
+Samsung実機、実物のBluetooth/USBキーボード、長時間のバックグラウンド確認は引き続き未検証です。
+
 実機は接続されていません。Samsung、実物のBluetoothキーボード、USBキーボードで確認したという意味ではありません。
 
 検証環境：Windows、Android API35のx86_64エミュレーター。既存AVDの読み取り専用起動で入力を確認後、容量を確保した専用AVDを`.local/avds/DualKeyTest.avd`に作成しました。
