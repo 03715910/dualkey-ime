@@ -1,6 +1,8 @@
 # DualKey IME
 
-Android用の独立したキーボードアプリです。**0.1.0は初期開発版**です。一般的な日本語IMEに相当する辞書品質やSamsung実機での動作を保証する段階ではありません。
+Android用の独立したキーボードアプリです。**0.1.1は初期開発版**です。一般的な日本語IMEに相当する辞書品質やSamsung実機での動作を保証する段階ではありません。
+
+配布サイト：[DualKey IME](https://03715910.github.io/dualkey-ime/)。Androidスマートフォンで開き、「APKをダウンロード」からインストールします。
 
 ## Android Studioで開く
 
@@ -52,9 +54,9 @@ $env:JAVA_HOME = 'C:\Program Files\Android\Android Studio\jbr'
 
 ## 配布・更新
 
-配布設定は`distribution.properties`に集約します。未公開の段階では空欄にし、架空のURLでは更新しません。サイトの元ファイルは`site/`です。公開するパッケージ名は`io.github.user03715910.dualkey`です。
+配布設定は`distribution.properties`に集約し、専用リポジトリと実際の配布先を設定しています。サイトの元ファイルは`site/`です。公開するパッケージ名は`io.github.user03715910.dualkey`です。以前の配布先未設定のローカル0.1.0からは、サイトのAPKを一度手動で上書きインストールしてください。
 
-サイトと`version.json`をGitHub Pages、APKと過去バージョンをGitHub Releasesに配置する設計です。APKをGit履歴に蓄積しないため、この組み合わせを採用しています。ソースの通常コミットでは公開しません。
+サイトと`version.json`をGitHub Pages、APKと過去バージョンをGitHub Releasesに配置します。APKをGit履歴に蓄積しないため、この組み合わせを採用しています。ソースの通常コミットでは公開しません。署名鍵をPC内に保管したまま、明示的な`tools/publish_local_release.py --confirm PUBLISH`でリリースとサイトを更新します。生成済みサイト専用の`gh-pages`ブランチへ反映し、GitHub Pagesの標準Actionsがデプロイします。署名用Secretsは未登録です。
 
 アプリは起動時（過剰な再確認を避け約1時間の間隔）、約12時間ごとのWorkManager、設定ボタンで更新確認します。自動ダウンロードは初期OFF、Wi-Fi限定は初期ONです。WorkManagerの実行時刻はOSの都合で変動します。検出・ダウンロードは入力を妨げず、インストール画面は利用者がボタンを押したときだけ開きます。
 

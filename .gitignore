@@ -15,3 +15,4 @@ local.properties
 dist/
 output/
 __pycache__/
+previous-history.json

@@ -10,6 +10,7 @@ val signing = properties(".local/signing.properties")
 fun secret(key: String) = System.getenv("DUALKEY_" + key.uppercase()) ?: signing.getProperty(key, "")
 fun quoted(value: String) = "\"" + value.replace("\\", "\\\\").replace("\"", "\\\"") + "\""
 val hasSigning = listOf("storeFile", "storePassword", "keyAlias", "keyPassword", "certSha256").all { secret(it).isNotBlank() }
+val releaseCertificate = distribution.getProperty("certificateSha256", secret("certSha256")).lowercase()
 
 android {
     namespace = "io.github.user03715910.dualkey"
@@ -26,7 +27,7 @@ android {
         buildConfigField("String", "WEBSITE_URL", quoted(distribution.getProperty("websiteUrl", "")))
         buildConfigField("String", "METADATA_URL", quoted(distribution.getProperty("metadataUrl", "")))
         buildConfigField("String", "RELEASE_REPOSITORY", quoted(distribution.getProperty("repository", "")))
-        buildConfigField("String", "TRUSTED_CERT_SHA256", quoted(secret("certSha256").lowercase()))
+        buildConfigField("String", "TRUSTED_CERT_SHA256", quoted(releaseCertificate))
     }
     signingConfigs {
         if (hasSigning) create("release") {
@@ -55,6 +56,9 @@ kotlin { compilerOptions { jvmTarget.set(org.jetbrains.kotlin.gradle.dsl.JvmTarg
 tasks.configureEach {
     if (name == "validateSigningRelease" || name == "preReleaseBuild") doFirst {
         check(hasSigning) { "Release signing is missing. See docs/RELEASE.md; a debug key must never be used for distribution." }
+        check(releaseCertificate.matches(Regex("[a-f0-9]{64}")) && releaseCertificate == secret("certSha256").lowercase()) {
+            "The release signing certificate must match the public update pin."
+        }
     }
 }
 dependencies {

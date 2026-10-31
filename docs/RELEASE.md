@@ -13,9 +13,24 @@ python tools/create_signing_key.py
 
 リリース署名が未設定なら正式リリース処理を完了させない設計です。デバッグ鍵へ自動で切り替えません。
 
-## 初回のGitHub設定
+## 現在の公開方式（署名鍵はPC内）
 
-公開リポジトリ作成・正式公開・署名Secrets登録には所有者の明示的な承認が必要です。既存リポジトリへ書き込みません。専用リポジトリを作成した後、その実在するリポジトリに合わせて`distribution.properties`の3項目を設定します。
+専用リポジトリは`03715910/dualkey-ime`、配布サイトは`https://03715910.github.io/dualkey-ime/`です。既存アプリのリポジトリやサイトは変更しません。署名鍵・パスワードをGitHubへ登録せず、PC内で署名します。`distribution.properties`にはURLと公開証明書のSHA-256だけを保存します。
+
+更新するときは次の順番です。
+
+1. `version.properties`のversionCodeとversionNameを増やし、`release-notes.txt`を更新します。
+2. ソースをコミット・mainへpushし、JVMテスト、Webテスト、署名Releaseビルド、Lintを実行します。
+3. `python tools/publish_local_release.py --confirm PUBLISH`を実行します。コミット・公開ソースとの一致、署名、ハッシュ、バージョン、以前の履歴を検証します。
+4. Draft ReleaseへAPK・version.json・更新内容を送り、取得し直して一致を確認してから公開します。
+5. 生成したサイトだけを`gh-pages`ブランチへpushします。GitHub Pagesの公開元は「Deploy from a branch」→`gh-pages`→`/ (root)`です。標準のPages Actionsによってデプロイされます。
+6. Pagesの成功後に`python tools/verify_public_release.py`を実行し、公開フィードとAPK全体を取得して照合します。
+
+通常のmainへのpushではAPK・サイトを正式更新しません。途中で失敗したときは公開済みのタグやAPKを上書きせず、失敗した段階を確認してください。Release公開後、サイトだけ失敗した場合は生成済み`dist/site/`を専用サイトブランチへ反映して再デプロイします。アプリの旧版と設定は削除しません。
+
+## 任意のクラウド署名へ変更する場合
+
+以下はクラウド署名を選ぶ場合だけの手順です。現在は未使用で、署名用Secretsは登録していません。秘密鍵の外部保管を希望する場合だけ、所有者の明示的な承認を得て登録します。既存リポジトリへ書き込みません。実在する専用リポジトリに合わせて`distribution.properties`を設定します。
 
 | キー | 値 |
 | --- | --- |
@@ -23,7 +38,7 @@ python tools/create_signing_key.py
 | websiteUrl | そのリポジトリのGitHub PagesのHTTPS URL（末尾`/`） |
 | metadataUrl | websiteUrl + `version.json` |
 
-GitHubのSettings → Pages → Build and deploymentは「GitHub Actions」を選びます。production環境に承認者を設定すると、公開の追加ゲートを作れます（契約・リポジトリ可視性の対応範囲に従ってください）。
+クラウド署名のワークフローへ切り替える場合だけ、GitHubのSettings → Pages → Build and deploymentを「GitHub Actions」へ変更します。現在のブランチ公開方式とは異なります。production環境に承認者を設定する運用も可能です。
 
 必要なGitHub Secrets：
 
@@ -35,7 +50,7 @@ GitHubのSettings → Pages → Build and deploymentは「GitHub Actions」を�
 
 承認済みの場合、`python tools/configure_github_secrets.py --repository 所有者/リポジトリ名`で値を標準入力からGitHub CLIへ渡せます。値は画面やコマンド引数に表示しません。これはGitHubへ秘密鍵を預ける操作なので、承認がない状態では実行しません。
 
-## 毎回の公開
+## クラウド署名を有効にした後の公開
 
 1. コードを修正し、coreテスト・Android Lint・ビルド・必要な実機確認を行います。
 2. `version.properties`のversionCodeを必ず増やし、表示用versionNameを変更します。`release-notes.txt`を更新します。
