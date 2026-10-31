@@ -34,7 +34,10 @@ class DeviceInputTest {
     private fun await(label: String,condition: ()->Boolean) {
         val deadline=SystemClock.uptimeMillis()+15_000
         while (SystemClock.uptimeMillis()<deadline) { if (condition()) return; SystemClock.sleep(80) }
-        fail("Timed out: $label")
+        val labels=mutableListOf<String>()
+        fun collect(node: AccessibilityNodeInfo?) { if (node==null) return; node.text?.toString()?.let(labels::add); for (i in 0 until node.childCount) collect(node.getChild(i)) }
+        instrumentation.uiAutomation.windows.filter { it.type==AccessibilityWindowInfo.TYPE_INPUT_METHOD }.forEach { collect(it.root) }
+        fail("Timed out: $label; input=${if (::editor.isInitialized) inputText() else "not ready"}; IME=${labels.joinToString(" | ")}")
     }
     private fun inputText(): String { var value=""; main { value=editor.text.toString() }; return value }
     private fun imeHeight(): Int { var value=0; main { value=ViewCompat.getRootWindowInsets(activity.window.decorView)?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0 }; return value }
@@ -52,12 +55,17 @@ class DeviceInputTest {
         }
         activity=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
         await("editor ready") { var found=false; main { found=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; found }
+        await("focused activity") { activity.hasWindowFocus() }
         main {
             editor=activity.findViewById<View>(android.R.id.content).findViewWithTag("test_input")
             editor.setText(""); editor.requestFocus(); ImeControl.request(DisplayMode.FULL)
             activity.getSystemService(InputMethodManager::class.java).showSoftInput(editor,0)
         }
-        await("IME shown") { imeHeight()>300 }
+        await("IME shown") {
+            val shown=imeHeight()>300
+            if (!shown) main { activity.getSystemService(InputMethodManager::class.java).showSoftInput(editor,0) }
+            shown
+        }
         val automation=instrumentation.uiAutomation
         automation.serviceInfo=automation.serviceInfo.apply { flags=flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
         SystemClock.sleep(200)

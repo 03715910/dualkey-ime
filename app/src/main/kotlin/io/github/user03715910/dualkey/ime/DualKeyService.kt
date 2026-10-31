@@ -335,9 +335,24 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         // Delayed composing-end notifications are normal; cancel only when the cursor leaves
         // that span, or an explicitly selected source changes.
         if (ownsComposition && ((candidatesEnd>=0 && (newSelStart!=candidatesEnd || newSelEnd!=candidatesEnd)) || (candidatesEnd<0 && moved))) {
+            // Editor clear/replace notifications can arrive after the next key has
+            // already begun a new composing span. Do not commit that new romaji as
+            // a literal because of an obsolete cursor report.
+            if (selectionReportIsStale(newSelStart,newSelEnd)) return
             currentInputConnection?.finishComposingText(); clearState()
         } else if (!ownsComposition && moved && translationJob!=null) invalidateTranslation()
     }
+    private fun selectionReportIsStale(start: Int,end: Int): Boolean = runCatching {
+        val connection=currentInputConnection ?: return@runCatching false
+        if (Build.VERSION.SDK_INT>=31) {
+            val position=connection.getSurroundingText(0,0,0)
+            if (position!=null && position.offset>=0) return@runCatching (
+                position.offset+position.selectionStart!=start || position.offset+position.selectionEnd!=end)
+        }
+        val extracted=connection.getExtractedText(ExtractedTextRequest().apply { hintMaxChars=1; hintMaxLines=1 },0)
+            ?: return@runCatching false
+        extracted.startOffset+extracted.selectionStart!=start || extracted.startOffset+extracted.selectionEnd!=end
+    }.getOrDefault(false)
     private fun translationMenu() {
         if (sensitive || numeric) return
         val directions=listOf<Pair<String,()->Unit>>("Googleで日→英" to { startTranslation(true) }, "Googleで英→日" to { startTranslation(false) })
