@@ -1,11 +1,9 @@
 package io.github.user03715910.dualkey.settings
 
 import android.Manifest
-import android.app.AlertDialog
 import android.content.*
 import android.content.pm.PackageManager
-import android.content.res.Configuration
-import android.graphics.Color
+import android.graphics.Typeface
 import android.net.Uri
 import android.os.*
 import android.provider.Settings as AndroidSettings
@@ -13,10 +11,16 @@ import android.text.InputType
 import android.view.*
 import android.view.inputmethod.InputMethodManager
 import android.widget.*
+import androidx.activity.OnBackPressedCallback
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.appcompat.widget.SwitchCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.FileProvider
 import androidx.core.view.*
 import androidx.datastore.preferences.core.Preferences
+import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.lifecycleScope
 import io.github.dualkey.core.*
 import io.github.user03715910.dualkey.*
@@ -24,237 +28,494 @@ import io.github.user03715910.dualkey.data.*
 import io.github.user03715910.dualkey.translation.TranslationEngine
 import io.github.user03715910.dualkey.update.*
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
+    private enum class Page { HOME, SETTINGS, UPDATES, INPUT, HARDWARE, CONVERSION, TRANSLATION, ABOUT }
     private val app get()=application as DualKeyApp
+    private lateinit var ui: SettingsUi
+    private lateinit var pageContent: LinearLayout
     private lateinit var content: LinearLayout
-    private lateinit var testInput: EditText
-    private lateinit var updateStatus: TextView
-    private lateinit var updateDetails: TextView
-    private lateinit var downloadButton: Button
-    private lateinit var installButton: Button
-    private var pendingInstall=false
+    private lateinit var scroll: ScrollView
+    private var testInput: EditText?=null
+    private var page=Page.HOME
+    private var uiReady=false
+    private var updateStatus: TextView?=null
+    private var updateDetails: TextView?=null
+    private var updatePrimary: Button?=null
+    private var updateCheck: Button?=null
+    private var updateProgress: ProgressBar?=null
+    private var homeUpdateStatus: TextView?=null
+    private var homeUpdateAction: Button?=null
+    private var keyboardStatus: TextView?=null
+    private var installWhenReady=false
+    private var awaitingPermissionResult=false
+    private var installInFlight=false
+    private var promptOnAvailable=false
+    private var promptedVersion=0L
+    private var lastCheckAttempt=0L
+    private var checkJob: Job?=null
+    private var updateDialog: AlertDialog?=null
+    private var permissionDialog: AlertDialog?=null
+    private val permissionLauncher=registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
+        val requested=awaitingPermissionResult && installWhenReady && page==Page.UPDATES
+        awaitingPermissionResult=false
+        installWhenReady=requested && packageManager.canRequestPackageInstalls()
+        lastCheckAttempt=SystemClock.elapsedRealtime()
+        if (uiReady) { renderUpdate(app.updates.state.value); resumeInstallationFlow() }
+    }
     private val translator=TranslationEngine()
-    private fun dp(n: Int)=(n*resources.displayMetrics.density).toInt()
+    private fun dp(n: Int)=ui.dp(n)
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        pendingInstall=savedInstanceState?.getBoolean("pendingInstall") ?: false
+        ui=SettingsUi(this)
+        installWhenReady=savedInstanceState?.getBoolean("installWhenReady") ?: false
+        awaitingPermissionResult=savedInstanceState?.getBoolean("awaitingPermissionResult") ?: false
+        promptedVersion=savedInstanceState?.getLong("promptedVersion") ?: 0L
+        page=runCatching { Page.valueOf(savedInstanceState?.getString("page") ?: "HOME") }.getOrDefault(Page.HOME)
         WindowCompat.setDecorFitsSystemWindows(window,false)
-        val light=resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK != Configuration.UI_MODE_NIGHT_YES
-        WindowInsetsControllerCompat(window,window.decorView).apply { isAppearanceLightStatusBars=light; isAppearanceLightNavigationBars=light }
-        lifecycleScope.launch {
-            app.settings.awaitLoaded(); buildScreen()
-            launch { app.updates.state.collect { renderUpdate(it) } }
-            app.updates.restoreCached()
-            if (app.settings.state.value.autoCheck) {
-                val p=getSharedPreferences("update_timing",MODE_PRIVATE)
-                val now=System.currentTimeMillis()
-                if (now-p.getLong("last_attempt",0)>3_600_000) { p.edit().putLong("last_attempt",now).apply(); checkUpdates() }
+        WindowInsetsControllerCompat(window,window.decorView).apply {
+            val light=resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK!=android.content.res.Configuration.UI_MODE_NIGHT_YES
+            isAppearanceLightStatusBars=light; isAppearanceLightNavigationBars=light
+        }
+        setContentView(R.layout.activity_main)
+        val root=findViewById<LinearLayout>(R.id.app_root)
+        root.setBackgroundColor(ui.paper)
+        findViewById<TextView>(R.id.app_title).setTextColor(ui.ink)
+        findViewById<View>(R.id.app_navigation).setBackgroundColor(ui.surface)
+        scroll=findViewById(R.id.page_scroll)
+        pageContent=findViewById(R.id.page_content)
+        content=pageContent
+        ViewCompat.setOnApplyWindowInsetsListener(root) { v,insets ->
+            val bars=insets.getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            val ime=insets.getInsets(WindowInsetsCompat.Type.ime())
+            v.setPadding(bars.left,bars.top,bars.right,maxOf(bars.bottom,ime.bottom))
+            findViewById<View>(R.id.app_navigation).visibility=if (insets.isVisible(WindowInsetsCompat.Type.ime())) View.GONE else View.VISIBLE
+            insets
+        }
+        listOf(R.id.nav_home to Page.HOME,R.id.nav_settings to Page.SETTINGS,R.id.nav_updates to Page.UPDATES).forEach { (id,target) ->
+            findViewById<TextView>(id).setOnClickListener { selectPage(target) }
+        }
+        onBackPressedDispatcher.addCallback(this,object: OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                if (page!=Page.HOME) selectPage(if (page in listOf(Page.SETTINGS,Page.UPDATES)) Page.HOME else Page.SETTINGS)
+                else { isEnabled=false; onBackPressedDispatcher.onBackPressed(); isEnabled=true }
             }
+        })
+        lifecycleScope.launch {
+            app.settings.awaitLoaded()
+            uiReady=true
+            if (intent.getBooleanExtra("settings",false)) page=Page.SETTINGS
+            if (intent.getBooleanExtra("updates",false)) page=Page.UPDATES
+            if (intent.getBooleanExtra("restore_keyboard",false)) page=Page.HOME
+            promptOnAvailable=app.settings.state.value.autoCheck && page!=Page.UPDATES && !intent.getBooleanExtra("restore_keyboard",false)
+            selectPage(page)
+            launch { app.updates.state.collect { renderUpdate(it) } }
+            if (!app.updates.state.value.busy) app.updates.restoreCached()
+            resumeInstallationFlow()
             if (intent.getBooleanExtra("restore_keyboard",false)) restoreKeyboard()
+            if (app.settings.state.value.autoCheck && !awaitingPermissionResult && !installWhenReady) requestCheck(true)
         }
     }
-    override fun onNewIntent(intent: Intent) { super.onNewIntent(intent); setIntent(intent); if (::testInput.isInitialized && intent.getBooleanExtra("restore_keyboard",false)) restoreKeyboard() }
-    override fun onSaveInstanceState(outState: Bundle) { outState.putBoolean("pendingInstall",pendingInstall); super.onSaveInstanceState(outState) }
+    override fun onNewIntent(intent: Intent) {
+        super.onNewIntent(intent); setIntent(intent)
+        if (!uiReady) return
+        when {
+            intent.getBooleanExtra("restore_keyboard",false) -> { selectPage(Page.HOME); restoreKeyboard() }
+            intent.getBooleanExtra("updates",false) -> { selectPage(Page.UPDATES); if (!app.updates.state.value.busy) lifecycleScope.launch { app.updates.restoreCached() } }
+            intent.getBooleanExtra("settings",false) -> selectPage(Page.SETTINGS)
+            app.settings.state.value.autoCheck && !awaitingPermissionResult && !installWhenReady -> requestCheck(true)
+        }
+    }
+    override fun onStart() {
+        super.onStart()
+        if (uiReady && app.settings.state.value.autoCheck && !awaitingPermissionResult && !installWhenReady) requestCheck(true)
+    }
     override fun onResume() {
         super.onResume()
-        if (pendingInstall && packageManager.canRequestPackageInstalls()) {
-            pendingInstall=false
-            lifecycleScope.launch { app.updates.state.value.let { s -> if (s.apk!=null && s.release!=null) install(s.apk,s.release) } }
-        }
+        if (uiReady) { refreshKeyboardStatus(); resumeInstallationFlow(); maybeShowUpdatePrompt() }
     }
-    override fun onDestroy() { translator.close(); super.onDestroy() }
-    private fun text(value: String, size: Float=16f)=TextView(this).apply {
-        text=value; textSize=size; setPadding(0,dp(5),0,dp(5)); setTextIsSelectable(true)
-    }.also { content.addView(it) }
-    private fun title(value: String) { text(value,22f).setPadding(0,dp(24),0,dp(7)) }
-    private fun button(label: String, action: ()->Unit)=Button(this).apply {
-        text=label; isAllCaps=false; setOnClickListener { action() }
-    }.also { content.addView(it,LinearLayout.LayoutParams(-1,-2)) }
+    override fun onPostResume() { super.onPostResume(); if (uiReady) resumeInstallationFlow() }
+    override fun onWindowFocusChanged(hasFocus: Boolean) {
+        super.onWindowFocusChanged(hasFocus)
+        if (hasFocus && uiReady) { resumeInstallationFlow(); maybeShowUpdatePrompt() }
+    }
+    override fun onSaveInstanceState(out: Bundle) {
+        out.putString("page",page.name); out.putBoolean("installWhenReady",installWhenReady)
+        out.putBoolean("awaitingPermissionResult",awaitingPermissionResult); out.putLong("promptedVersion",promptedVersion)
+        super.onSaveInstanceState(out)
+    }
+    override fun onDestroy() { updateDialog?.dismiss(); permissionDialog?.dismiss(); translator.close(); super.onDestroy() }
+    private fun text(value: String,size: Float=14f)=ui.label(value,size,secondary=size<16).also(content::addView)
+    private fun button(label: String,primary: Boolean=false,action: ()->Unit)=ui.button(content,label,primary,action)
+    private fun section(title: String,subtitle: String?=null,body: ()->Unit) {
+        val parent=content; content=ui.card(parent,title,subtitle)
+        body(); content=parent
+    }
+    private fun heading(title: String,subtitle: String) {
+        content.addView(ui.label(title,24f,bold=true)); text(subtitle).setPadding(0,0,0,dp(16))
+    }
     private fun <T> save(key: Preferences.Key<T>,value: T) { lifecycleScope.launch { app.settings.set(key,value) } }
-    private fun toggle(label: String, key: Preferences.Key<Boolean>, value: Boolean, extra: ((Boolean)->Unit)?=null) {
-        content.addView(androidx.appcompat.widget.SwitchCompat(this).apply {
-            text=label; textSize=16f; minHeight=dp(56); isChecked=value
+    private fun toggle(label: String,key: Preferences.Key<Boolean>,value: Boolean,extra: ((Boolean)->Unit)?=null) {
+        content.addView(SwitchCompat(this).apply {
+            text=label; textSize=16f; setTextColor(ui.ink); minHeight=dp(58); setPadding(0,dp(10),0,dp(10)); isChecked=value
             setOnCheckedChangeListener { _,checked -> save(key,checked); extra?.invoke(checked) }
         },LinearLayout.LayoutParams(-1,-2))
     }
-    private fun slider(label: String,key: Preferences.Key<Int>,value: Int,min: Int,max: Int) {
-        val caption=text("$label：$value")
+    private fun slider(label: String,key: Preferences.Key<Int>,value: Int,min: Int,max: Int,unit: String="") {
+        val row=ui.row(content)
+        row.addView(ui.label(label,16f),LinearLayout.LayoutParams(0,-2,1f))
+        val valueLabel=ui.label("$value$unit",15f,bold=true).also { row.addView(it) }
         content.addView(SeekBar(this).apply {
-            this.max=max-min; progress=value-min
+            this.max=max-min; progress=value-min; contentDescription=label
             setOnSeekBarChangeListener(object: SeekBar.OnSeekBarChangeListener {
-                override fun onProgressChanged(s: SeekBar?,p: Int,fromUser: Boolean) { caption.text="$label：${p+min}" }
+                override fun onProgressChanged(s: SeekBar?,p: Int,fromUser: Boolean) { valueLabel.text="${p+min}$unit" }
                 override fun onStartTrackingTouch(s: SeekBar?) {}
                 override fun onStopTrackingTouch(s: SeekBar) { save(key,s.progress+min) }
             })
-        },LinearLayout.LayoutParams(-1,dp(48)))
+        },LinearLayout.LayoutParams(-1,dp(44)))
     }
     private fun selection(label: String,labels: List<String>,index: Int,select: (Int)->Unit) {
-        text(label)
-        content.addView(Spinner(this).apply {
-            adapter=ArrayAdapter(this@MainActivity,android.R.layout.simple_spinner_dropdown_item,labels)
-            setSelection(index)
-            var previous=index
-            onItemSelectedListener=object: AdapterView.OnItemSelectedListener {
-                override fun onItemSelected(p: AdapterView<*>?,v: View?,position: Int,id: Long) { if (position!=previous) { previous=position; select(position) } }
-                override fun onNothingSelected(p: AdapterView<*>?) {}
+        text(label,16f)
+        button(labels[index]) {
+            AlertDialog.Builder(this).setTitle(label).setSingleChoiceItems(labels.toTypedArray(),index) { dialog,which ->
+                select(which); dialog.dismiss(); lifecycleScope.launch { delay(100); selectPage(page) }
+            }.setNegativeButton("閉じる",null).show()
+        }
+    }
+    private fun selectPage(target: Page) {
+        if (target!=Page.UPDATES) { installWhenReady=false; awaitingPermissionResult=false }
+        if (target==Page.HOME && page==Page.HOME && pageContent.childCount>0) { renderUpdate(app.updates.state.value); return }
+        if (target==Page.UPDATES) promptOnAvailable=false
+        if (page!=target || target!=Page.HOME) hideKeyboard()
+        page=target; pageContent.removeAllViews(); content=pageContent
+        testInput=null; updateStatus=null; updateDetails=null; updatePrimary=null; updateCheck=null; updateProgress=null
+        homeUpdateStatus=null; homeUpdateAction=null; keyboardStatus=null
+        if (target !in listOf(Page.HOME,Page.SETTINGS,Page.UPDATES)) button("‹ 設定に戻る") { selectPage(Page.SETTINGS) }
+        when (target) {
+            Page.HOME -> home()
+            Page.SETTINGS -> settingsMenu()
+            Page.UPDATES -> updates()
+            Page.INPUT -> inputSettings()
+            Page.HARDWARE -> hardwareSettings()
+            Page.CONVERSION -> conversionSettings()
+            Page.TRANSLATION -> translationSettings()
+            Page.ABOUT -> about()
+        }
+        scroll.post { scroll.scrollTo(0,0) }
+        renderUpdate(app.updates.state.value); refreshKeyboardStatus()
+    }
+    private fun home() {
+        heading("あなたのキーボード","フリックと物理キーボードを、ひとつに。")
+        section("アプリの更新") {
+            homeUpdateStatus=text("")
+            homeUpdateAction=button("更新を確認") { selectPage(Page.UPDATES); if (app.updates.state.value.release==null) requestCheck(false,true) else startUpdate() }
+        }
+        section("キーボードの準備") {
+            keyboardStatus=text("",16f)
+            button("1. キーボードを有効にする") { openIntent(Intent(AndroidSettings.ACTION_INPUT_METHOD_SETTINGS)) }
+            button("2. 使用するキーボードを選択",true) { getSystemService(InputMethodManager::class.java).showInputMethodPicker() }
+            text("初回だけAndroidの設定が開きます。")
+        }
+        section("入力を試す","ここでサイズや打ち心地を確認できます。") {
+            testInput=EditText(this).apply {
+                hint="ここをタップして入力"; textSize=18f; setTextColor(ui.ink); setHintTextColor(ui.muted)
+                minLines=2; maxLines=5; minHeight=dp(96)
+                inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+                background=ui.shape(ui.paper,12,true); setPadding(dp(14),dp(12),dp(14),dp(12))
+                tag="test_input"; isSaveEnabled=false; id=View.generateViewId()
+            }.also { content.addView(it,LinearLayout.LayoutParams(-1,-2).apply { topMargin=dp(8) }) }
+            button("画面キーボードを表示",true) { restoreKeyboard() }
+            val parent=content; val row=ui.row(parent); content=row
+            button("省スペース") { ImeControl.request(DisplayMode.COMPACT); restoreEditorFocus() }.layoutParams=LinearLayout.LayoutParams(0,-2,1f).apply { topMargin=dp(8); marginEnd=dp(4) }
+            button("隠す") { ImeControl.request(DisplayMode.HIDDEN); hideKeyboard() }.layoutParams=LinearLayout.LayoutParams(0,-2,1f).apply { topMargin=dp(8); marginStart=dp(4) }
+            content=parent
+            button("入力とサイズを調整") { selectPage(Page.INPUT) }
+        }
+    }
+    private fun settingsMenu() {
+        heading("設定","使いたい項目を選んでください。")
+        listOf(
+            Triple("入力とサイズ","言語・数字行・キーボードの高さ",Page.INPUT),
+            Triple("物理キーボード","接続時の表示・ショートカット",Page.HARDWARE),
+            Triple("変換と辞書","予測候補・ユーザー辞書",Page.CONVERSION),
+            Triple("翻訳","日英の切り替え・モデルの管理",Page.TRANSLATION),
+            Triple("アプリ更新","更新の確認・自動ダウンロード",Page.UPDATES),
+            Triple("アプリについて","バージョン・プライバシー・ライセンス",Page.ABOUT)
+        ).forEach { (title,detail,target) ->
+            ui.card(content,"$title  ›",detail).apply {
+                tag="settings_${target.name.lowercase()}"; isClickable=true; isFocusable=true; minimumHeight=dp(80)
+                background=android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x22087F8C),ui.shape(ui.surface),null)
+                setOnClickListener { selectPage(target) }
             }
-        },LinearLayout.LayoutParams(-1,dp(52)))
-    }
-    private fun buildScreen() {
-        val scroll=ScrollView(this)
-        content=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; isFocusableInTouchMode=true }
-        scroll.addView(content); setContentView(scroll)
-        ViewCompat.setOnApplyWindowInsetsListener(scroll) { _,insets ->
-            val bars=insets.getInsets(WindowInsetsCompat.Type.systemBars())
-            scroll.setPadding(bars.left+dp(18),bars.top,bars.right+dp(18),bars.bottom+dp(24)); insets
         }
+    }
+    private fun inputSettings() {
         val s=app.settings.state.value
-        title("DualKey IME")
-        text("タッチと物理キーボードを、ひとつの入力に。",18f)
-        text("バージョン ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}） / Android 8.0以上")
-        button("1. キーボードを有効にする") { openIntent(Intent(AndroidSettings.ACTION_INPUT_METHOD_SETTINGS)) }
-        button("2. 使用するキーボードを選択") { getSystemService(InputMethodManager::class.java).showInputMethodPicker() }
-        text("Androidの入力方法の警告を確認し、信頼できる場合にDualKeyを有効にしてください。入力文章をログに保存しません。")
-        testInput=EditText(this).apply {
-            hint="ここをタップして入力を試す"; minLines=2; maxLines=5
-            inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
-            tag="test_input"
-            isSaveEnabled=false; id=View.generateViewId()
+        heading("入力とサイズ","お好みの大きさと操作感に。")
+        section("大きさ") {
+            slider("キーの高さ",Prefs.keyHeight,s.keyHeight,32,80," dp")
+            slider("全体の倍率",Prefs.heightPercent,s.heightPercent,70,140," %")
+            text("標準は40dp・100%。横画面では高さを自動調整します。")
+            button("標準の大きさに戻す") { lifecycleScope.launch {
+                app.settings.set(Prefs.keyHeight,40); app.settings.set(Prefs.heightPercent,100)
+                app.settings.state.first { it.keyHeight==40 && it.heightPercent==100 }; selectPage(Page.INPUT)
+            } }
         }
-        content.addView(testInput,LinearLayout.LayoutParams(-1,-2))
-        button("画面キーボードを通常表示に戻す") { restoreKeyboard() }
-        button("省スペース表示にする") { ImeControl.request(DisplayMode.COMPACT); toast("次に入力欄をタップすると省スペース表示になります") }
-        button("完全非表示にする") { ImeControl.request(DisplayMode.HIDDEN); toast("復帰は通常表示ボタン・Ctrl+Alt+K・クイック設定から行えます") }
-        text("完全非表示からは、このアプリを開き「通常表示に戻す」を押せます。入力先にフォーカスが必要なため、この画面では上のテスト欄を開きます。通知パネルの編集から「DualKeyを表示」タイルも追加できます。")
-
-        title("入力設定")
-        toggle("初期モードを英語にする",Prefs.initialEnglish,s.initialEnglish)
-        toggle("数字専用行を表示",Prefs.numberRow,s.numberRow)
-        slider("フリック開始距離（dp）",Prefs.flickDp,s.flickDp,8,64)
-        slider("キーの高さ（dp）",Prefs.keyHeight,s.keyHeight,32,80)
-        slider("キーボード全体の倍率（%）",Prefs.heightPercent,s.heightPercent,70,140)
-        text("横画面などでは画面に収まる高さへ自動調整します。")
-        toggle("キー操作時の振動",Prefs.vibration,s.vibration)
-        toggle("キー操作音",Prefs.sound,s.sound)
-
-        title("物理キーボード設定")
-        selection("物理キーボード接続時の画面表示",listOf("自動（接続で完全非表示）","常に通常表示","省スペース表示","完全非表示"),s.policy.ordinal) {
-            save(Prefs.hardwarePolicy,HardwarePolicy.entries[it].name)
+        section("入力とフィードバック") {
+            toggle("初期モードを英語にする",Prefs.initialEnglish,s.initialEnglish)
+            toggle("数字専用行を表示",Prefs.numberRow,s.numberRow)
+            slider("フリック開始距離",Prefs.flickDp,s.flickDp,8,64," dp")
+            toggle("キー操作時の振動",Prefs.vibration,s.vibration)
+            toggle("キー操作音",Prefs.sound,s.sound)
         }
-        toggle("前回の手動選択を次の接続時も記憶",Prefs.rememberManual,s.rememberManual)
-        toggle("Ctrl + Alt + K で表示を切り替え",Prefs.shortcut,s.shortcut)
-        toggle("Ctrl + Space で日本語・英語切り替え",Prefs.ctrlSpace,s.ctrlSpace)
-        text("切断時は通常表示に復帰します。半角/全角・英数・かなキーにも対応します。OSがショートカットを先に処理する端末では、アプリ画面やタイルをご利用ください。配列とShift/Caps LockはAndroidが生成するキー情報に従います。")
-        button("Androidの物理キーボード設定") { openIntent(Intent(AndroidSettings.ACTION_HARD_KEYBOARD_SETTINGS)) }
-
-        title("変換設定")
-        toggle("日本語の予測候補",Prefs.japanesePrediction,s.japanesePrediction)
-        toggle("英語の予測候補",Prefs.englishPrediction,s.englishPrediction)
-        slider("最大候補数",Prefs.candidateCount,s.candidateCount,2,30)
-        text("現在は端末内の小規模辞書を使った簡易変換です。Mozcは未導入です。一般的な日本語IMEと同等の辞書量・文節解析はありません。")
-        button("ユーザー辞書に単語を追加") { addWord() }
-        button("ユーザー辞書を確認・削除") { dictionary() }
-
-        title("翻訳設定")
-        toggle("翻訳方向の初期値：日本語 → 英語",Prefs.translateToEnglish,s.toEnglish)
-        text("Google ML Kitによる端末内翻訳です。初回は約30MBの日本語モデルをWi-Fiで取得します。翻訳結果をプレビューしてから確定します。パスワード欄では使用できません。")
-        button("翻訳モデルをダウンロード（Wi-Fi）") { lifecycleScope.launch {
-            toast("モデルを取得します。Wi-Fi接続でしばらくお待ちください")
-            try { translator.download(app.settings.state.value.toEnglish); toast("モデルの準備ができました") }
-            catch (e: CancellationException) { throw e } catch (_: Exception) { toast("モデルを取得できませんでした。Wi-Fi接続を確認してください") }
-        } }
-        button("翻訳モデルを削除") { lifecycleScope.launch {
-            try { translator.delete(); toast("日本語の翻訳モデルを削除しました") }
-            catch (e: CancellationException) { throw e } catch (_: Exception) { toast("モデルを削除できませんでした") }
-        } }
-        button("Google翻訳について") { openIntent(Intent(Intent.ACTION_VIEW,Uri.parse("https://cloud.google.com/translate"))) }
-
-        title("アプリ更新")
-        text("現在：${BuildConfig.VERSION_NAME}（versionCode ${BuildConfig.VERSION_CODE}）")
-        toggle("自動更新確認（約12時間ごと）",Prefs.autoCheck,s.autoCheck)
-        toggle("APKを自動ダウンロード",Prefs.autoDownload,s.autoDownload)
-        toggle("Wi-Fi接続時のみダウンロード",Prefs.wifiOnly,s.wifiOnly)
-        toggle("更新通知",Prefs.notifications,s.notifications) { if (it) requestNotificationPermission() }
-        if (Build.VERSION.SDK_INT>=33) button("Androidの通知を許可する") { requestNotificationPermission() }
-        updateStatus=text("")
-        updateDetails=text("")
-        button("今すぐ更新を確認") { lifecycleScope.launch { checkUpdates() } }
-        downloadButton=button("更新APKをダウンロード") { downloadUpdate() }
-        installButton=button("検証済みAPKをインストール") {
-            val state=app.updates.state.value
-            if (state.apk!=null && state.release!=null) lifecycleScope.launch { install(state.apk,state.release) }
-        }
-        button("ダウンロードサイトを開く") { openWebsite() }
-        button("更新履歴を表示") {
-            val release=app.updates.state.value.release
-            if (release!=null) AlertDialog.Builder(this).setTitle(release.versionName).setMessage(release.releaseNotes.joinToString("\n")).setPositiveButton("閉じる",null).show()
-            else if (BuildConfig.WEBSITE_URL.isNotBlank()) openIntent(Intent(Intent.ACTION_VIEW,Uri.parse(BuildConfig.WEBSITE_URL+"#history")))
-            else toast("配布サイトの公開後に利用できます。0.1.0：初期開発版")
-        }
-        text("自動処理は更新検出と設定に応じたAPK取得までです。インストールはボタンを押してAndroid標準の確認を行います。定期処理の時刻はOSが調整します。設定・ユーザー辞書は同じ署名・アプリIDでの更新時に保持されます。")
-
-        title("アプリ情報・プライバシー")
-        text("入力文章を独自サーバーへ送信しません。キー入力をログや履歴に保存しません。パスワード欄では予測・翻訳・未確定プレビューを無効にします。ユーザー辞書は追加操作をした単語だけを端末内に保存します。")
-        text("通信はアプリ更新、翻訳モデル取得、およびGoogle ML Kitの利用状況・診断通信に使われます。ML Kit翻訳に入力文章の送信は不要です。端末のバックアップ対象からは除外しています。アプリをアンインストールすると保存データが消えます。")
-        button("ライセンス・利用技術") {
-            val notice=assets.open("NOTICE.txt").bufferedReader().use { it.readText() }
-            AlertDialog.Builder(this).setTitle("ライセンス・利用技術").setMessage(notice).setPositiveButton("閉じる",null).show()
-        }
-        text("Samsungの「画面キーボードを表示」やセキュリティ設定、他アプリの入力実装により動作が変わる場合があります。Bluetooth/USB接続と更新は実機での確認が必要です。")
-        renderUpdate(app.updates.state.value)
+        button("入力を試す",true) { selectPage(Page.HOME); restoreKeyboard() }
     }
-    private fun restoreKeyboard() {
-        ImeControl.request(DisplayMode.FULL)
-        testInput.requestFocus()
-        testInput.postDelayed({ getSystemService(InputMethodManager::class.java).showSoftInput(testInput,0) },250)
+    private fun hardwareSettings() {
+        val s=app.settings.state.value
+        heading("物理キーボード","Bluetooth・USBキーボードの設定です。")
+        section("画面の表示") {
+            selection("接続時の表示",listOf("自動で隠す","常に通常表示","省スペース表示","完全非表示"),s.policy.ordinal) { save(Prefs.hardwarePolicy,HardwarePolicy.entries[it].name) }
+            toggle("手動で選んだ表示を次回も使う",Prefs.rememberManual,s.rememberManual)
+            text("接続を解除すると通常表示に戻ります。完全非表示からは、ホームの表示ボタンで復帰できます。")
+        }
+        section("ショートカット") {
+            toggle("Ctrl + Alt + K で表示切り替え",Prefs.shortcut,s.shortcut)
+            toggle("Ctrl + Space で日英切り替え",Prefs.ctrlSpace,s.ctrlSpace)
+            text("Spaceで変換、矢印で候補選択、Enterで確定。端末が先に使うキーは画面操作で代用できます。")
+            button("Androidのキーボード配列設定") { openIntent(Intent(AndroidSettings.ACTION_HARD_KEYBOARD_SETTINGS)) }
+        }
     }
+    private fun conversionSettings() {
+        val s=app.settings.state.value
+        heading("変換と辞書","候補の表示と、よく使う単語を管理。")
+        section("予測候補") {
+            toggle("日本語の予測候補",Prefs.japanesePrediction,s.japanesePrediction)
+            toggle("英語の予測候補",Prefs.englishPrediction,s.englishPrediction)
+            slider("候補の数",Prefs.candidateCount,s.candidateCount,2,30)
+        }
+        section("ユーザー辞書","追加した単語は端末内に保存します。") {
+            text("登録した読み：${s.dictionary.size}件",16f)
+            button("単語を追加",true) { addWord() }
+            button("登録した単語を確認・削除") { dictionary() }
+            text("現在は基本辞書による簡易変換です。変換できる単語には限りがあります。")
+        }
+    }
+    private fun translationSettings() {
+        val s=app.settings.state.value
+        heading("翻訳","日本語と英語を端末内で翻訳します。")
+        section("翻訳方向") { toggle("初期値を日本語 → 英語にする",Prefs.translateToEnglish,s.toEnglish) }
+        section("翻訳モデル","初回はWi-Fiで約30MBのモデルを取得します。") {
+            val status=text("モデルの状態を確認しています…")
+            lifecycleScope.launch { status.text=if (translator.ready()) "ダウンロード済み・オフラインで利用できます" else "モデルは未取得です" }
+            button("モデルをダウンロード",true) { lifecycleScope.launch {
+                status.text="モデルを取得しています…"
+                try { translator.download(app.settings.state.value.toEnglish); status.text="モデルの準備ができました" }
+                catch (e: CancellationException) { throw e } catch (_: Exception) { status.text="取得できませんでした。Wi-Fi接続を確認してください。" }
+            } }
+            button("モデルを削除") { lifecycleScope.launch {
+                try { translator.delete(); status.text="モデルを削除しました" }
+                catch (e: CancellationException) { throw e } catch (_: Exception) { status.text="削除できませんでした。もう一度お試しください。" }
+            } }
+            text("キーボードの「翻訳」から結果を確認して入力します。パスワード欄では使えません。")
+        }
+    }
+    private fun updates() {
+        val s=app.settings.state.value
+        heading("アプリ更新","この画面からダウンロードして更新できます。")
+        section("現在のバージョン  ${BuildConfig.VERSION_NAME}") {
+            updateStatus=text("",17f)
+            updateProgress=ProgressBar(this,null,android.R.attr.progressBarStyleHorizontal).apply {
+                max=100; visibility=View.GONE; contentDescription="更新の進行状況"
+            }.also { content.addView(it,LinearLayout.LayoutParams(-1,dp(8)).apply { topMargin=dp(12); bottomMargin=dp(12) }) }
+            updatePrimary=button("今すぐ更新を確認",true) {
+                if (app.updates.state.value.release==null) requestCheck(false,true) else startUpdate()
+            }.apply { tag="update_primary" }
+            updateDetails=text("")
+            updateCheck=button("更新情報を再確認") { requestCheck(false,true) }
+            text("最後はAndroidの確認画面でインストールします。設定と辞書は引き継がれます。")
+        }
+        section("自動確認とダウンロード") {
+            toggle("起動時に更新を確認",Prefs.autoCheck,s.autoCheck)
+            toggle("自動ダウンロード",Prefs.autoDownload,s.autoDownload)
+            toggle("Wi-Fi接続時のみ",Prefs.wifiOnly,s.wifiOnly)
+            toggle("アプリ外の更新通知",Prefs.notifications,s.notifications) { if (it) requestNotificationPermission() }
+            text("更新は起動時と約12時間ごとに確認します。")
+            if (Build.VERSION.SDK_INT>=33 && !NotificationManagerCompat.from(this).areNotificationsEnabled()) {
+                button("通知を許可する") { requestNotificationPermission() }
+                text("アプリ外の通知にはAndroidの許可が必要です。起動時の画面内案内は、許可がなくても表示します。")
+            }
+        }
+        section("履歴と配布サイト") {
+            button("更新履歴を見る") { openWebsite("#history") }
+            button("ダウンロードサイトを開く") { openWebsite() }
+        }
+    }
+    private fun about() {
+        heading("アプリについて","DualKey IME ${BuildConfig.VERSION_NAME}")
+        section("入力とプライバシー") {
+            text("入力文章を独自サーバーへ送信しません。キー入力をログや履歴に保存しません。パスワード欄では予測・翻訳・未確定プレビューを無効にします。",16f)
+            text("通信はアプリ更新、翻訳モデル取得、Google ML Kitの利用状況・診断通信に使います。翻訳文は端末内で処理します。辞書は自分で追加した単語だけを保存します。")
+            text("アンインストールすると設定と辞書が消えます。更新はアンインストールせずに行ってください。")
+        }
+        section("利用技術と動作確認") {
+            text("Android 8.0以上 / バージョン ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
+            text("日本語変換は小規模辞書です。Mozcは未導入です。Samsung実機・Bluetooth/USBの実接続は追加確認が必要です。")
+            button("ライセンスを表示") {
+                AlertDialog.Builder(this).setTitle("ライセンス・利用技術").setMessage(assets.open("NOTICE.txt").bufferedReader().use { it.readText() }).setPositiveButton("閉じる",null).show()
+            }
+            button("配布サイト") { openWebsite() }
+        }
+    }
+    private fun refreshKeyboardStatus() {
+        if (!uiReady) { return }
+        val imm=getSystemService(InputMethodManager::class.java)
+        val enabled=imm.enabledInputMethodList.any { it.packageName==packageName }
+        val selected=AndroidSettings.Secure.getString(contentResolver,AndroidSettings.Secure.DEFAULT_INPUT_METHOD).orEmpty().startsWith("$packageName/")
+        keyboardStatus?.apply {
+            text=when {
+                selected -> "✓ DualKey IMEを使用中です"
+                enabled -> "有効です。使用するキーボードを選んでください。"
+                else -> "初回の設定を行ってください。"
+            }
+            setTextColor(if (selected) ui.accent else ui.ink)
+        }
+    }
+    private fun hideKeyboard() {
+        testInput?.let { editor ->
+            editor.clearFocus()
+            getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(editor.windowToken,0)
+        }
+        if (::pageContent.isInitialized) { pageContent.requestFocus() }
+    }
+    private fun restoreKeyboard() { if (page!=Page.HOME) selectPage(Page.HOME); ImeControl.request(DisplayMode.FULL); restoreEditorFocus() }
+    private fun restoreEditorFocus() { testInput?.let { editor -> editor.requestFocus(); editor.postDelayed({ getSystemService(InputMethodManager::class.java).showSoftInput(editor,0) },250) } }
     private fun renderUpdate(state: UpdateState) {
-        if (!::updateStatus.isInitialized) return
-        updateStatus.text=state.message+(state.progress?.let { " $it%" } ?: "")
-        updateDetails.text=state.release?.let { r -> "現在 ${BuildConfig.VERSION_NAME} → ${r.versionName}\n${r.releaseDate} / ${"%.1f".format(r.sizeBytes/1048576.0)} MB\n"+r.releaseNotes.joinToString("\n")+(if (r.required) "\n配布元は必須更新を指定しています。入力機能は継続できます。" else "") }.orEmpty()
-        downloadButton.isEnabled=state.release!=null && !state.busy
-        installButton.isEnabled=state.apk!=null && !state.busy
+        if (!uiReady) return
+        if (state.failure) installWhenReady=false
+        val hasUpdate=state.release!=null
+        val message=if (state.message=="最新バージョンを使用しています") "最新バージョンです" else state.message
+        val nav=listOf(R.id.nav_home to (page==Page.HOME),R.id.nav_settings to (page !in listOf(Page.HOME,Page.UPDATES)),R.id.nav_updates to (page==Page.UPDATES))
+        nav.forEach { (id,selected) -> findViewById<TextView>(id).apply {
+            isSelected=selected; setTextColor(if (selected) ui.accent else ui.muted); setTypeface(typeface,if (selected) Typeface.BOLD else Typeface.NORMAL)
+            background=if (selected) ui.shape(ui.soft,12) else null
+        } }
+        findViewById<TextView>(R.id.nav_updates).text=if (hasUpdate) "更新 ●" else "更新"
+        homeUpdateStatus?.text=when { state.busy -> message+(state.progress?.let { " $it%" } ?: ""); hasUpdate -> "新しいバージョン ${state.release!!.versionName} があります"; else -> "現在 ${BuildConfig.VERSION_NAME}\n$message" }
+        homeUpdateAction?.text=when { state.busy -> "進行状況を見る"; state.apk!=null -> "インストールして更新"; hasUpdate -> "更新する"; else -> "更新を確認" }
+        updateStatus?.text=if (state.apk!=null && !state.busy && !packageManager.canRequestPackageInstalls())
+            "インストールの許可が必要です"
+            else message+(state.progress?.let { " $it%" } ?: "")
+        updateDetails?.apply {
+            text=state.release?.let { r -> "${BuildConfig.VERSION_NAME} → ${r.versionName}\n${"%.1f".format(r.sizeBytes/1048576.0)} MB・${r.releaseDate}\n\n"+r.releaseNotes.take(8).joinToString("\n")+(if (r.required) "\n推奨される重要な更新です。入力は継続できます。" else "") }.orEmpty()
+            visibility=if (hasUpdate) View.VISIBLE else View.GONE
+        }
+        updateProgress?.apply { visibility=if (state.busy) View.VISIBLE else View.GONE; isIndeterminate=state.progress==null; progress=state.progress ?: 0 }
+        updatePrimary?.apply { isEnabled=!state.busy && !installInFlight; alpha=if (isEnabled) 1f else .55f; text=when { state.busy -> "処理中…"; state.apk!=null -> "インストールして更新"; hasUpdate -> "ダウンロードして更新"; else -> "今すぐ更新を確認" } }
+        updateCheck?.apply { visibility=if (hasUpdate) View.VISIBLE else View.GONE; isEnabled=!state.busy }
+        if (installWhenReady && state.apk!=null && !state.busy) resumeInstallationFlow()
+        maybeShowUpdatePrompt()
     }
-    private suspend fun checkUpdates() {
-        val info=app.updates.check()
-        if (info!=null && app.settings.state.value.autoDownload) UpdateScheduler.download(this,app.settings.state.value.wifiOnly)
+    private fun requestCheck(prompt: Boolean,force: Boolean=false) {
+        if (prompt) promptOnAvailable=true
+        if (!uiReady || app.updates.state.value.busy || checkJob?.isActive==true) return
+        val now=SystemClock.elapsedRealtime()
+        if (!force && now-lastCheckAttempt<10_000 && lastCheckAttempt!=0L) { if (prompt) maybeShowUpdatePrompt(); return }
+        lastCheckAttempt=now; promptOnAvailable=prompt
+        checkJob=lifecycleScope.launch {
+            val info=app.updates.check()
+            if (info!=null) {
+                if (prompt && app.settings.state.value.notifications) {
+                    val notices=getSharedPreferences("update_notices",MODE_PRIVATE)
+                    if (notices.getLong("version",0)!=info.versionCode && NotificationManagerCompat.from(this@MainActivity).areNotificationsEnabled()) {
+                        UpdateScheduler.notify(this@MainActivity,"${info.versionName} を利用できます。タップして更新できます")
+                        notices.edit().putLong("version",info.versionCode).apply()
+                    }
+                }
+                if (app.settings.state.value.autoDownload && app.updates.state.value.apk==null) UpdateScheduler.download(this@MainActivity,app.settings.state.value.wifiOnly)
+            }
+            maybeShowUpdatePrompt()
+        }
     }
-    private fun downloadUpdate() {
-        val info=app.updates.state.value.release ?: return
-        if (app.settings.state.value.wifiOnly && !UpdateScheduler.isWifi(this)) { toast("Wi-Fiに接続してください。設定でWi-Fi限定を解除することもできます"); return }
-        lifecycleScope.launch { app.updates.download(info) }
+    private fun maybeShowUpdatePrompt() {
+        if (!uiReady || !hasWindowFocus() || !app.settings.state.value.autoCheck || page==Page.UPDATES || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) || isFinishing || installWhenReady || awaitingPermissionResult) return
+        val state=app.updates.state.value; val release=state.release ?: return
+        if (!promptOnAvailable || promptedVersion==release.versionCode || updateDialog?.isShowing==true || testInput?.hasFocus()==true) return
+        promptedVersion=release.versionCode
+        updateDialog=AlertDialog.Builder(this).setTitle("新しいバージョンがあります")
+            .setMessage("${BuildConfig.VERSION_NAME} → ${release.versionName}\n${"%.1f".format(release.sizeBytes/1048576.0)} MB\n\n"+release.releaseNotes.take(6).joinToString("\n"))
+            .setPositiveButton(if (state.busy) "進行状況を見る" else "更新する") { _,_ ->
+                selectPage(Page.UPDATES); if (!app.updates.state.value.busy) startUpdate()
+            }.setNegativeButton("あとで") { _,_ -> promptOnAvailable=false }
+            .setOnDismissListener { updateDialog=null }.create().also { it.show() }
+    }
+    private fun startUpdate() {
+        val state=app.updates.state.value
+        if (state.busy || state.release==null) return
+        promptOnAvailable=false
+        if (page!=Page.UPDATES) selectPage(Page.UPDATES)
+        if (state.apk!=null) { installWhenReady=true; resumeInstallationFlow(); return }
+        if (app.settings.state.value.wifiOnly && !UpdateScheduler.isWifi(this)) {
+            AlertDialog.Builder(this).setTitle("Wi-Fi接続を確認してください")
+                .setMessage("Wi-Fi限定の設定が有効です。接続後にもう一度更新するか、今回だけ別の回線でダウンロードできます。")
+                .setPositiveButton("今回だけダウンロード") { _,_ -> beginDownload(state.release) }
+                .setNegativeButton("あとで",null).show()
+        } else beginDownload(state.release)
+    }
+    private fun beginDownload(release: ReleaseInfo) {
+        installWhenReady=true
+        // Application scope keeps the transfer alive across Activity recreation/rotation.
+        app.scope.launch {
+            try {
+                if (app.updates.download(release)!=null) UpdateScheduler.notify(this@MainActivity,"更新の準備ができました。タップしてインストールできます")
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { app.updates.state.value=UpdateState("更新を取得できませんでした。もう一度お試しください。",release,failure=true) }
+        }
+    }
+    private fun resumeInstallationFlow() {
+        if (!uiReady || !hasWindowFocus() || page!=Page.UPDATES || testInput?.hasFocus()==true || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED) || installInFlight || permissionDialog?.isShowing==true) return
+        if (awaitingPermissionResult) return
+        if (!installWhenReady) return
+        val state=app.updates.state.value
+        if (state.busy || state.apk==null || state.release==null) return
+        installInFlight=true
+        lifecycleScope.launch { try { install(state.apk,state.release) } finally { installInFlight=false; updatePrimary?.isEnabled=!app.updates.state.value.busy } }
     }
     private suspend fun install(file: File,info: ReleaseInfo) {
-        if (ImeControl.inputActive && !testInput.hasFocus()) { toast("入力を終了してから更新ボタンを押してください"); return }
-        testInput.clearFocus(); content.requestFocus()
-        getSystemService(InputMethodManager::class.java).hideSoftInputFromWindow(testInput.windowToken,0)
+        hideKeyboard()
         try {
             withContext(Dispatchers.IO) { ApkSafety(this@MainActivity).verify(file,info) }
+            if (!installWhenReady || page!=Page.UPDATES || !hasWindowFocus() || !lifecycle.currentState.isAtLeast(Lifecycle.State.RESUMED)) return
             if (!packageManager.canRequestPackageInstalls()) {
-                pendingInstall=true
-                AlertDialog.Builder(this).setTitle("インストールの許可")
-                    .setMessage("次のAndroid設定でDualKey IMEからのインストールを許可してください。戻ると検証済みAPKの確認画面へ進みます。")
-                    .setPositiveButton("設定を開く") { _,_ -> openIntent(Intent(AndroidSettings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:$packageName"))) }
-                    .setNegativeButton("あとで") { _,_ -> pendingInstall=false }.show()
+                permissionDialog=AlertDialog.Builder(this).setTitle("アプリからの更新を許可")
+                    .setMessage("次のAndroid設定でDualKey IMEからのインストールを許可してください。この画面に戻ると、Androidの更新確認へ進みます。")
+                    .setPositiveButton("設定を開く") { _,_ ->
+                        awaitingPermissionResult=true
+                        try { permissionLauncher.launch(Intent(AndroidSettings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,Uri.parse("package:$packageName"))) }
+                        catch (_: ActivityNotFoundException) { awaitingPermissionResult=false; installWhenReady=false; toast("Android設定からインストールの許可を確認してください") }
+                    }
+                    .setNegativeButton("あとで") { _,_ -> installWhenReady=false }
+                    .setOnCancelListener { installWhenReady=false }
+                    .setOnDismissListener { permissionDialog=null }.create().also { it.show() }
                 return
             }
+            installWhenReady=false
             val uri=FileProvider.getUriForFile(this,"$packageName.updates",file)
-            openIntent(Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
-        } catch (e: CancellationException) { throw e } catch (e: Exception) { toast("インストールを開始できません。${e.message.orEmpty().take(100)}") }
+            openIntent(Intent(Intent.ACTION_VIEW).setDataAndType(uri,"application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        } catch (e: CancellationException) { throw e }
+        catch (_: Exception) { installWhenReady=false; updateStatus?.text="インストールを開始できませんでした。更新情報を再確認してください。"; toast("APKの検証またはインストールを開始できませんでした") }
     }
     private fun addWord() {
-        val box=LinearLayout(this).apply { orientation=LinearLayout.VERTICAL; setPadding(dp(20),0,dp(20),0) }
-        val reading=EditText(this).apply { hint="よみ（ひらがな）" }
-        val word=EditText(this).apply { hint="単語" }
+        val box=ui.column().apply { setPadding(dp(20),dp(8),dp(20),0) }
+        val reading=EditText(this).apply { hint="よみ（ひらがな）" }; val word=EditText(this).apply { hint="単語" }
         box.addView(reading); box.addView(word)
         val dialog=AlertDialog.Builder(this).setTitle("ユーザー辞書に追加").setView(box).setPositiveButton("追加",null).setNegativeButton("キャンセル",null).create()
         dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val r=reading.text.toString().trim(); val w=word.text.toString().trim()
             if (!r.matches(Regex("[ぁ-ゖー]{1,50}")) || w.isEmpty() || w.length>100) { toast("よみはひらがな50文字以内、単語は100文字以内で入力してください"); return@setOnClickListener }
-            lifecycleScope.launch { app.settings.addWord(r,w); dialog.dismiss(); toast("単語を追加しました") }
+            lifecycleScope.launch { app.settings.addWord(r,w); dialog.dismiss(); selectPage(Page.CONVERSION) }
         } }; dialog.show()
     }
     private fun dictionary() {
@@ -262,11 +523,20 @@ class MainActivity : AppCompatActivity() {
         if (words.isEmpty()) { toast("登録した単語はありません"); return }
         val keys=words.keys.sorted()
         AlertDialog.Builder(this).setTitle("削除する読みを選択").setItems(keys.map { "$it：${words[it]?.joinToString(" / ")}" }.toTypedArray()) { _,i ->
-            AlertDialog.Builder(this).setMessage("「${keys[i]}」の登録を削除しますか？").setPositiveButton("削除") { _,_ -> lifecycleScope.launch { app.settings.removeWord(keys[i]); toast("削除しました") } }.setNegativeButton("戻る",null).show()
+            AlertDialog.Builder(this).setMessage("「${keys[i]}」の登録を削除しますか？").setPositiveButton("削除") { _,_ -> lifecycleScope.launch { app.settings.removeWord(keys[i]); selectPage(Page.CONVERSION) } }.setNegativeButton("戻る",null).show()
         }.setNegativeButton("閉じる",null).show()
     }
-    private fun requestNotificationPermission() { if (Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),301) }
-    private fun openWebsite() { if (BuildConfig.WEBSITE_URL.isBlank()) toast("配布サイトはまだ公開されていません") else openIntent(Intent(Intent.ACTION_VIEW,Uri.parse(BuildConfig.WEBSITE_URL))) }
-    private fun openIntent(intent: Intent) { try { startActivity(intent) } catch (_: ActivityNotFoundException) { toast("この端末では設定画面を開けません。Android設定から操作してください") } }
+    private fun requestNotificationPermission() {
+        if (Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) {
+            if (getPreferences(MODE_PRIVATE).getBoolean("notification_requested",false) && !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
+                openIntent(Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE,packageName))
+            } else {
+                getPreferences(MODE_PRIVATE).edit().putBoolean("notification_requested",true).apply()
+                requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),301)
+            }
+        }
+    }
+    private fun openWebsite(fragment: String="") { if (BuildConfig.WEBSITE_URL.isNotBlank()) openIntent(Intent(Intent.ACTION_VIEW,Uri.parse(BuildConfig.WEBSITE_URL+fragment))) }
+    private fun openIntent(intent: Intent) { try { startActivity(intent) } catch (_: ActivityNotFoundException) { toast("この端末では画面を開けません。Android設定から操作してください") } }
     private fun toast(message: String) { Toast.makeText(this,message,Toast.LENGTH_LONG).show() }
 }

@@ -244,7 +244,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             "full" -> chooseDisplay(DisplayMode.FULL)
             "compact" -> chooseDisplay(DisplayMode.COMPACT)
             "hide" -> chooseDisplay(DisplayMode.HIDDEN)
-            "settings" -> startActivity(Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+            "settings" -> startActivity(Intent(this, MainActivity::class.java).putExtra("settings",true)
+                .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
             "picker" -> getSystemService(InputMethodManager::class.java).showInputMethodPicker()
             "translate" -> translationMenu()
             "symbols" -> { symbols=!symbols; rebuild() }

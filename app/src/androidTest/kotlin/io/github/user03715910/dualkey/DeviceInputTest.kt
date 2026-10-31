@@ -20,7 +20,7 @@ import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
 
-/** Actual Android input routing and touch injection. Requires DualKey debug as the selected IME. */
+/** Actual Android input routing and touch injection for the target build variant. */
 @RunWith(AndroidJUnit4::class)
 class DeviceInputTest {
     private val instrumentation=InstrumentationRegistry.getInstrumentation()
@@ -36,7 +36,8 @@ class DeviceInputTest {
     private fun inputText(): String { var value=""; main { value=editor.text.toString() }; return value }
     private fun imeHeight(): Int { var value=0; main { value=ViewCompat.getRootWindowInsets(activity.window.decorView)?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0 }; return value }
     @Before fun openEditor() {
-        val component=instrumentation.targetContext.packageName+"/io.github.user03715910.dualkey.ime.DualKeyService"
+        val component=android.content.ComponentName(instrumentation.targetContext.packageName,
+            "io.github.user03715910.dualkey.ime.DualKeyService").flattenToShortString()
         // UTP reinstalls the app and can reset the default IME. Select the actual target, never Gboard.
         listOf("ime enable $component","ime set $component").forEach { command ->
             shell(command)

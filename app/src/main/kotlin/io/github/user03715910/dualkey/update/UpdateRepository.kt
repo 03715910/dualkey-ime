@@ -13,7 +13,7 @@ import java.io.File
 import java.security.MessageDigest
 
 data class UpdateState(val message: String="更新は未確認です", val release: ReleaseInfo?=null, val apk: File?=null,
-    val busy: Boolean=false, val progress: Int?=null)
+    val busy: Boolean=false, val progress: Int?=null, val failure: Boolean=false)
 
 class UpdateRepository(private val context: Context) {
     private val policy=UpdatePolicy(context.packageName,BuildConfig.WEBSITE_URL,BuildConfig.RELEASE_REPOSITORY)
@@ -35,7 +35,7 @@ class UpdateRepository(private val context: Context) {
     } }
     suspend fun check(): ReleaseInfo? = withContext(Dispatchers.IO) { mutex.withLock {
         if (!configured) { state.value=UpdateState("配布サイトはまだ設定されていません"); return@withLock null }
-        state.value=state.value.copy(message="更新情報を確認しています…",busy=true)
+        state.value=state.value.copy(message="更新情報を確認しています…",busy=true,failure=false)
         try {
             val text=network.metadata()
             val info=ReleaseJson.parse(text); policy.validate(info)
@@ -45,20 +45,20 @@ class UpdateRepository(private val context: Context) {
             state.value=UpdateState(if (available) "新しいバージョン ${info.versionName} があります" else if (info.minSdk>Build.VERSION.SDK_INT) "新しい版はこのAndroidに対応していません" else "最新バージョンを使用しています",if (available) info else null,if (available) verifiedFile(info) else null)
             if (available) info else null
         } catch (e: CancellationException) { state.value=state.value.copy(busy=false); throw e }
-        catch (e: Exception) { state.value=state.value.copy(message="更新を確認できませんでした。${e.message.orEmpty().take(160)}",busy=false); null }
+        catch (e: Exception) { state.value=state.value.copy(message="更新を確認できませんでした。${e.message.orEmpty().take(160)}",busy=false,failure=true); null }
     } }
     suspend fun cachedRelease(): ReleaseInfo? = withContext(Dispatchers.IO) {
         runCatching { ReleaseJson.parse(cached.readFully().toString(Charsets.UTF_8)).also { policy.validate(it); check(policy.isNewer(it,BuildConfig.VERSION_CODE.toLong(),Build.VERSION.SDK_INT)) } }.getOrNull()
     }
     suspend fun download(info: ReleaseInfo): File? = withContext(Dispatchers.IO) { mutex.withLock {
-        policy.validate(info)
-        check(policy.isNewer(info,BuildConfig.VERSION_CODE.toLong(),Build.VERSION.SDK_INT))
         directory.mkdirs()
         directory.listFiles()?.filter { it.name.endsWith(".part") || System.currentTimeMillis()-it.lastModified()>7*86_400_000L }?.forEach { it.delete() }
         val part=File(directory,"download.part")
         val verified=File(directory,"verified-${info.versionCode}.apk")
         state.value=UpdateState("APKを取得しています…",info,busy=true,progress=0)
         try {
+            policy.validate(info)
+            check(policy.isNewer(info,BuildConfig.VERSION_CODE.toLong(),Build.VERSION.SDK_INT))
             if (verified.exists()) { ApkSafety(context).verify(verified,info); state.value=UpdateState("検証済みAPKを利用できます",info,verified); return@withLock verified }
             val connection=network.apk(info.apkUrl)
             try {
@@ -84,7 +84,7 @@ class UpdateRepository(private val context: Context) {
             state.value=UpdateState("検証が完了しました。Androidの確認画面で更新できます",info,verified)
             verified
         } catch (e: CancellationException) { state.value=state.value.copy(busy=false); throw e }
-        catch (e: Exception) { verified.delete(); state.value=UpdateState("更新APKを取得できませんでした。${e.message.orEmpty().take(160)}",info); null }
+        catch (e: Exception) { verified.delete(); state.value=UpdateState("更新APKを取得できませんでした。${e.message.orEmpty().take(160)}",info,failure=true); null }
         finally { part.delete() }
     } }
 }

@@ -1,0 +1,18 @@
+<LinearLayout xmlns:android="http://schemas.android.com/apk/res/android"
+    android:id="@+id/app_root" android:layout_width="match_parent" android:layout_height="match_parent" android:orientation="vertical">
+    <LinearLayout android:id="@+id/app_header" android:layout_width="match_parent" android:layout_height="wrap_content"
+        android:gravity="center_vertical" android:orientation="horizontal" android:paddingHorizontal="20dp" android:paddingVertical="14dp">
+        <ImageView android:layout_width="32dp" android:layout_height="32dp" android:src="@drawable/ic_dualkey" android:importantForAccessibility="no" />
+        <TextView android:id="@+id/app_title" android:layout_width="0dp" android:layout_height="wrap_content" android:layout_weight="1"
+            android:layout_marginStart="12dp" android:text="DualKey IME" android:textSize="22sp" android:textStyle="bold" />
+    </LinearLayout>
+    <ScrollView android:id="@+id/page_scroll" android:layout_width="match_parent" android:layout_height="0dp" android:layout_weight="1" android:fillViewport="true" android:clipToPadding="false">
+        <LinearLayout android:id="@+id/page_content" android:layout_width="match_parent" android:layout_height="wrap_content"
+            android:orientation="vertical" android:paddingHorizontal="16dp" android:paddingTop="8dp" android:paddingBottom="20dp" android:focusableInTouchMode="true" />
+    </ScrollView>
+    <LinearLayout android:id="@+id/app_navigation" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="horizontal" android:padding="6dp">
+        <TextView android:id="@+id/nav_home" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" android:gravity="center" android:text="ホーム" android:textSize="15sp" android:contentDescription="ホーム" />
+        <TextView android:id="@+id/nav_settings" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" android:gravity="center" android:text="設定" android:textSize="15sp" android:contentDescription="設定" />
+        <TextView android:id="@+id/nav_updates" android:layout_width="0dp" android:layout_height="56dp" android:layout_weight="1" android:gravity="center" android:text="更新" android:textSize="15sp" android:contentDescription="更新" />
+    </LinearLayout>
+</LinearLayout>

@@ -35,7 +35,8 @@ object UpdateScheduler {
         if (android.os.Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) return
         val nm=context.getSystemService(NotificationManager::class.java)
         nm.createNotificationChannel(NotificationChannel("updates","アプリ更新",NotificationManager.IMPORTANCE_DEFAULT))
-        val intent=PendingIntent.getActivity(context,11,Intent(context,MainActivity::class.java).putExtra("updates",true),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+        val intent=PendingIntent.getActivity(context,11,Intent(context,MainActivity::class.java).putExtra("updates",true)
+            .addFlags(Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP),PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val n=NotificationCompat.Builder(context,"updates").setSmallIcon(R.drawable.ic_dualkey).setContentTitle("DualKey IMEの更新")
             .setContentText(message).setContentIntent(intent).setAutoCancel(true).build()
         runCatching { NotificationManagerCompat.from(context).notify(10,n) }
