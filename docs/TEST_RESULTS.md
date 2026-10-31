@@ -7,6 +7,9 @@
 - 横画面（1746×720px）の配置試験も成功。数字がかなと同じ高さになる問題を修正し、数字をさらに低く保ったうえで4段全体が収まることを確認しました。
 - 標準・拡大文字・横画面の実際の画面は`output/keyboard-preview-0.1.2.png`、`output/keyboard-large-font-0.1.2.png`、`output/keyboard-landscape-0.1.2.png`です。API35エミュレーターのデバッグ版であり、Samsung実機の画像ではありません。
 - Debug・署名Release・テストAPKのビルド、JVM11件・Web9件、Release Lintのエラーなしを確認しました。
+- 同じ署名鍵の0.1.1 / code 4から0.1.2 / code 5へ専用AVDでADB更新し、設定とユーザー辞書の21項目すべてが保持されました（`compact-update-retention.log`）。
+- 0.1.2を実際に公開し、PagesのHTML・JS・CSS・アイコンのHTTP 200、通常URLのversion.jsonがcode 5を返すこと、公開APK全体の容量とSHA-256一致を確認しました（`compact-public-verify.log`）。SHA-256は`b9005165a29680e30335e4846b91f6a4fab41e084ce0e20c98b46b9ace94792e`、容量は67,392,750バイトです。
+- [GitHub開発CI](https://github.com/03715910/dualkey-ime/actions/runs/41191800841)と[Pagesデプロイ](https://github.com/03715910/dualkey-ime/actions/runs/41191914919)も成功しました。署名鍵はPC内のままで、Secrets登録は行っていません。
 - 最初の端末試験はSystem UIの応答停止により中断しました。その後、パスワード欄の切替を固定350ms待機から実際のIME表示切替完了の待機へ変更し、14件を再実行して成功しました。実行記録は`compact-input-final.log`、`compact-large-font-test.log`、`compact-landscape-final.log`、`compact-portrait-final.log`です。
 
 Samsung実機、実物のBluetooth/USBキーボード、長時間のバックグラウンド確認は引き続き未検証です。
@@ -90,4 +93,4 @@ APK試験の最初の実行では、Androidのパッケージ可視性制限に�
 
 Samsung実機、Bluetooth/USBの接続と切断、画面回転、クイック設定タイル、実物のJIS/US配列・OSショートカット競合、API26–27の復帰API、長時間のWorkManagerによる自動検出・自動取得、標準インストーラー経由での更新完了と保持、インストール中断、容量不足、消費電力・長文性能は追加確認が必要です。検証未実施を機能の不存在とは扱いませんが、動作保証にも使いません。
 
-端末試験はテスト用IMEを選択するため、普段使いの実機で自動実行しないでください。試験用のversionCode 2・3のAPKは`.local/update-test/`にだけ置き、公開しません。正式配布物は`output/DualKeyIME-0.1.1.apk`です。
+端末試験はテスト用IMEを選択するため、普段使いの実機で自動実行しないでください。試験用のversionCode 2・3のAPKは`.local/update-test/`にだけ置き、公開しません。現在の配布物は`output/DualKeyIME-0.1.2.apk`です。
