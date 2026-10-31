@@ -1,6 +1,26 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 5,
+    "versionName": "0.1.2",
+    "releaseDate": "2026-10-31",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.2/DualKeyIME-0.1.2.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "b9005165a29680e30335e4846b91f6a4fab41e084ce0e20c98b46b9ace94792e",
+    "sizeBytes": 67392750,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "日本語キーボードを4段・5列へ整理し、標準の文字キー高さを52dpから40dpへ縮小",
+      "数字専用行・上部ツールバー・候補欄を薄くして、入力欄を広く表示",
+      "中央にかなキー、左右に削除・カーソル・空白・確定キーを配置",
+      "フリック方向はタッチ時のプレビューで確認でき、通常のキー表示は1文字へ簡素化",
+      "カーソルキーは変換候補の移動にも対応",
+      "保存済みの高さ設定は維持。Samsung実機・Bluetooth/USBの実接続は引き続き未確認"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 4,
     "versionName": "0.1.1",
     "releaseDate": "2026-10-31",
