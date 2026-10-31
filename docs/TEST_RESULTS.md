@@ -1,4 +1,4 @@
-# テスト結果（2026-10-31）
+# テスト結果（最終更新：2026-11-01）
 
 ## 0.1.5：単漢字・候補上限・学習・フリック（2026-11-01）
 
@@ -7,8 +7,10 @@
 - 同じ試験では、実際に「か」キーへタッチを注入した状態の画面を取得し、吹き出しが表示されること、左へ動かすと「き」のセルが選択色になること、離すと「き」が入力されることも確認しました。画像は`output/repertoire-0.1.5/flick-ka-center.png`、`flick-ka-left.png`です。
 - 最初はIMEのウィンドウを画面の原点として扱ったため、吹き出しが画面外へ配置されました。API29以降の公式の画面座標指定と、それ以前のウィンドウ座標指定へ分けて修正しています。最初の`repertoire-input-tests.log`では19件成功・描画1件失敗、修正後の`repertoire-bubble-test.log`では描画1件成功、その後20件を再実行して全件成功しました。
 - 学習DBの端末試験3件も成功。使用回数と補助漢字の保存・新しい接続からの再読込、学習OFF時の保存停止、削除前に待機していた保存操作によるデータ復活の防止を確認しました（`repertoire-learning-tests.log`）。
+- 旧設定の候補数30件を変更せず、「一覧」→「さらに候補を検索」で130件を取得する追加の入力試験1件も成功しました（`repertoire-more-search-test.log`）。入力の実施は合計21件です。
 - 0.1.4 / code 7 → 0.1.5 / code 8をADBで上書きし、既存の入力設定・ユーザー辞書21項目が保持されました（`repertoire-retention.log`）。学習は新設DBへ分け、既存設定の保存構造は変えていません。
 - Release・テストAPKの生成、Release Lintエラーなし、Web9件の成功を確認。字種・語彙の集計と保存方針は[学習とフリック](LEARNING_AND_FLICK.md)に記載しました。
+- [0.1.5](https://github.com/03715910/dualkey-ime/releases/tag/v0.1.5)を実際に公開しました。[開発CI](https://github.com/03715910/dualkey-ime/actions/runs/41218551075)・[Pages公開](https://github.com/03715910/dualkey-ime/actions/runs/41218801055)は成功、通常URLのversion.jsonはcode 8、サイト資産はHTTP 200でした。公開APK全体の容量91,610,806バイト・SHA-256 `d04454e1ea007f9589f33d9ce56725cd9d562a65df5664b6e7c289b36cd9b272`の一致も確認しました（`repertoire-public-verify.log`）。署名鍵はPC内のみで保持しています。
 
 Samsung実機、実物のBluetooth/USB接続、API26～28での吹き出しの表示、Android標準インストーラーで利用者の確認を含む更新完了は未確認です。字形の表示は端末フォントに依存します。
 
