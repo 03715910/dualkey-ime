@@ -1,6 +1,26 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 8,
+    "versionName": "0.1.5",
+    "releaseDate": "2026-10-31",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.5/DualKeyIME-0.1.5.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "d04454e1ea007f9589f33d9ce56725cd9d562a65df5664b6e7c289b36cd9b272",
+    "sizeBytes": 91610806,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "単漢字・異体字を約5万字へ拡充し、辞書を約120万組の読みと表記へ増量",
+      "変換・予測候補を最大1,000件へ拡大し、一覧で50件ずつ追加表示",
+      "かなキーの上に5方向のひし形の吹き出しを表示し、フリック方向を強調",
+      "日本語の確定した語句を端末内で学習し、使用頻度の高い候補を上位に表示",
+      "学習のON/OFFとデータ削除を追加し、パスワード・学習禁止欄では保存・利用を無効化",
+      "設定とユーザー辞書、起動時の更新案内とアプリ内更新を維持"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 7,
     "versionName": "0.1.4",
     "releaseDate": "2026-10-31",
