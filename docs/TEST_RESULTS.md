@@ -14,6 +14,9 @@
 - 更新後の保持：同じ鍵のリリースAPKをADBでversionCode 1→2へ更新し、「初期モードを英語」「数字行を非表示」の2設定が維持されることを確認。
 - 継続作業での追加確認：署名ReleaseのversionCode 2→3を専用AVDでADB更新し、設定・ユーザー辞書の21項目を更新前のスナップショットと比較してすべて一致。入力言語、数字行、フリック距離、キー高さ・全体倍率、振動・音、接続時表示、手動表示の記憶と保存値、2つのショートカット、日英予測・候補数、翻訳方向、更新関連4設定、ユーザー辞書を含みます。追加した2つの端末テストは成功しました。試験用versionCode 3 / 0.1.2は`.local/update-test/retention-next-code3.apk`で、配布しません。
 - リリースAPK：apksignerでv2/v3署名を検証。アプリID・versionCode=1・versionName=0.1.0・minSdk=26・targetSdk=35を確認。
+- 初回公開版：0.1.1 / versionCode 4を同じ鍵で署名。実際のPages、version.json、GitHub Releases APKを公開し、サイトと必須資産のHTTP 200、APK全体の容量・SHA-256一致を確認。GitHub Pages標準Actionsの成功を確認。署名鍵をGitHubへ登録していません。
+- 公開フィードの端末内確認：実際の配布先を設定した試験用旧版（versionCode 3）を専用AVDへ導入。アプリ自身のUpdateRepositoryで公開version.jsonから4を検出し、公開APK全体をHTTPS取得してサイズ・ハッシュ・暗号署名・証明書・パッケージ・バージョンを検証。公開0.1.1へADB更新後、21項目の設定・ユーザー辞書がすべて一致しました。
+- GitHub開発CI：Linux上のJVMテスト・Debugビルド・Lint・Webテストに成功（run 41188911833）。初回はSDK設定Actionが廃止された`tools`パッケージを取得しようとして失敗したため、公式の現行v4と`platform-tools`指定へ修正して再実行しました。Pagesの初回有効化でも自動有効化との競合409があり、設定の再読込へ修正し、実際のPages公開とHTTP取得を確認しました。
 - ビルド：Debug、署名Release、Android Test APKを生成。Debug/ReleaseのAndroid Lintはエラーなし。更新案内や国際化などの警告は残っています。
 - 画面画像：最下段とシステムのナビゲーション表示の重なり、および「わ」キーの文字切れを修正。systemBars/captionBarの余白と行の配置を確認し、入力11件を再実行して成功。最終画像は`output/keyboard-preview.png`（デバッグ版のエミュレーター）です。
 
@@ -23,7 +26,7 @@ APK試験の最初の実行では、Androidのパッケージ可視性制限に�
 
 ローカルの実行記録：`final-insets-build.log`、`final-insets-tests.log`（表示修正後の入力・翻訳UI11件成功）、`emulator-final-integration.log`（翻訳エンジン1件の成功と修正前の試験環境エラーを含む）、`apk-safety-final.log`（修正後8件成功）、`update-retention.log`。ログはGitに含めません。
 
-追加の実行記録：`resume-release-test-final-build.log`（署名Release・テストAPK生成成功）、`resume-complete-retention.log`、`release-update-retention.log`（21項目の保存・更新後一致）、`resume-final-build.log`（配布版と通常のデバッグテスト構成への復帰ビルド）。公開フィード用の2テストも追加しましたが、公開先がないため未実施です。
+追加の実行記録：`resume-release-test-final-build.log`（署名Release・テストAPK生成成功）、`resume-complete-retention.log`、`release-update-retention.log`（21項目の保存・更新後一致）、`resume-final-build.log`（通常構成への復帰ビルド）。公開時の記録は`public-release-build.log`、`public-publish.log`（初回設定競合の記録を含む）、`public-verify.log`、`public-app-update.log`です。
 
 ## 依頼書の40項目
 
@@ -55,13 +58,13 @@ APK試験の最初の実行では、Androidのパッケージ可視性制限に�
 | 22 | 物理候補操作 | 実施済み：矢印・Space・Enter・Esc |
 | 23 | 日→英翻訳 | 実施済み：モデル取得後にエンジンで変換し、IMEの方向選択・プレビュー・確定も確認 |
 | 24 | 英→日翻訳 | 実施済み：モデル取得後にエンジンで変換 |
-| 25 | サイトを開く | 一部実施：ローカルHTTP 200とHTML確認。公開未実施。Workでブラウザー利用が無効のためブラウザー描画検証は不可 |
-| 26 | サイトからAPK取得 | 未実施：公開操作の確認待ち |
+| 25 | サイトを開く | 実施済み：公開HTML・JS・CSS・アイコンがHTTP 200。ブラウザー描画検証は未実施 |
+| 26 | サイトからAPK取得 | 実施済み：公開メタデータの配布リンクからAPK全体を再取得し、容量・SHA-256一致。スマホブラウザーの一連操作は未実施 |
 | 27 | APKインストール | 実施済み：署名Releaseを端末へADB導入。ブラウザーからの一連操作は未実施 |
 | 28 | 初期設定 | 一部実施：設定アプリ起動・IME有効化・選択後の入力。初回のユーザー操作全体は未実施 |
-| 29 | 新version.json取得 | 未実施：配布先未設定。JSON解析・公式ネットワーククライアントは実装 |
-| 30 | 新版検出 | 一部実施：versionCodeによる大小比較は単体成功。実サーバーからの検出は未実施 |
-| 31 | 安全なAPK取得 | 一部実施：公式URL制限を単体試験、取得後の実APK検証を端末試験。実配布URLからの一連取得は未実施 |
+| 29 | 新version.json取得 | 実施済み：デスクトップと専用AVDのアプリから公開HTTPSフィードを取得 |
+| 30 | 新版検出 | 実施済み：公開フィードの4を試験用旧版3のアプリで検出 |
+| 31 | 安全なAPK取得 | 実施済み：アプリ自身が公式配布先からAPK全体を取得し、暗号署名・証明書・ハッシュ・容量・アプリID・版を検証 |
 | 32 | 署名・ハッシュ検証 | 実施済み：端末の実APK検証とデスクトップのapksigner |
 | 33 | 標準の更新画面 | 一部実施：デバッグ提供元のFileProviderから標準のインストーラー／許可画面を開く。アプリの公開フィードからの全工程は未実施 |
 | 34 | 更新後の設定保持 | 実施済み：同じ鍵の署名ReleaseをADBで更新し、実装済み設定・ユーザー辞書の21項目すべてを比較。標準インストーラー経由の完了確認は未実施 |
@@ -69,11 +72,11 @@ APK試験の最初の実行では、Androidのパッケージ可視性制限に�
 | 36 | 破損APK拒否 | 実施済み：再計算した正しいハッシュでも、APK署名の破損を拒否 |
 | 37 | 不正署名拒否 | 実施済み：別鍵の有効な署名・一致ハッシュでも拒否 |
 | 38 | オフライン入力 | 実施済み：Wi-Fi・モバイル通信を切り、NIHONGO→日本語を入力・確定 |
-| 39 | GitHub Actions公開 | 未実施：ワークフロー、スクリプト、YAML構文を確認。リポジトリ作成・Secrets・実行は確認待ち |
-| 40 | 公開サイトの最新版反映 | 一部実施：JSのメタデータ反映を単体試験。実際の公開更新は未実施 |
+| 39 | GitHub Actions公開 | 一部実施：PC内署名のAPKを公開スクリプトでReleaseへ送り、Pages標準Actionsでサイトの公開に成功。秘密鍵を使うクラウド署名ワークフローは未設定・未実行 |
+| 40 | 公開サイトの最新版反映 | 実施済み：公開version.json・履歴・APKが0.1.1に一致。JSのバージョン表示は単体試験、公開ブラウザー描画は未実施 |
 
 ## 残る検証
 
-Samsung実機、Bluetooth/USBの接続と切断、画面回転、クイック設定タイル、実物のJIS/US配列・OSショートカット競合、API26–27の復帰API、公開後の自動確認とダウンロード、長時間のWorkManager、標準インストーラー経由での更新完了と保持、インストール中断、容量不足、消費電力・長文性能は追加確認が必要です。検証未実施を機能の不存在とは扱いませんが、動作保証にも使いません。
+Samsung実機、Bluetooth/USBの接続と切断、画面回転、クイック設定タイル、実物のJIS/US配列・OSショートカット競合、API26–27の復帰API、長時間のWorkManagerによる自動検出・自動取得、標準インストーラー経由での更新完了と保持、インストール中断、容量不足、消費電力・長文性能は追加確認が必要です。検証未実施を機能の不存在とは扱いませんが、動作保証にも使いません。
 
-端末試験はテスト用IMEを選択するため、普段使いの実機で自動実行しないでください。試験用の0.1.1 / versionCode 2 APKは`.local/update-test/`にだけ置いています。正式配布物は`output/DualKeyIME-0.1.0.apk`です。
+端末試験はテスト用IMEを選択するため、普段使いの実機で自動実行しないでください。試験用のversionCode 2・3のAPKは`.local/update-test/`にだけ置き、公開しません。正式配布物は`output/DualKeyIME-0.1.1.apk`です。
