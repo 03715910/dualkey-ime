@@ -14,12 +14,13 @@
 - 更新後の保持：同じ鍵のリリースAPKをADBでversionCode 1→2へ更新し、「初期モードを英語」「数字行を非表示」の2設定が維持されることを確認。
 - リリースAPK：apksignerでv2/v3署名を検証。アプリID・versionCode=1・versionName=0.1.0・minSdk=26・targetSdk=35を確認。
 - ビルド：Debug、署名Release、Android Test APKを生成。Debug/ReleaseのAndroid Lintはエラーなし。更新案内や国際化などの警告は残っています。
+- 画面画像：最下段とシステムのナビゲーション表示の重なり、および「わ」キーの文字切れを修正。systemBars/captionBarの余白と行の配置を確認し、入力11件を再実行して成功。最終画像は`output/keyboard-preview.png`（デバッグ版のエミュレーター）です。
 
 APK試験の最初の実行では、Androidのパッケージ可視性制限により試験アプリから配布版を参照できませんでした。デバッグ専用Manifestのqueriesで修正し、APK試験8件をすべて再実行して成功しています。配布版へ他アプリ参照の宣言は追加していません。
 
 翻訳UIの追加試験では、IMEの高さ変更直後の座標が古い位置を指す試験上の問題を修正しました。翻訳ボタンの検証には標準のアクセシビリティCLICKアクションを使い、フリック・通常キーは実際のタッチ注入を使っています。IME側でも、未確定入力の末尾更新通知を誤って翻訳の取消と扱わないよう調整し、入力11件をすべて再実行して成功しています。
 
-ローカルの実行記録：`release-final.log`、`input-regression-final.log`（入力・翻訳UI11件成功）、`emulator-final-integration.log`（翻訳エンジン1件の成功と修正前の試験環境エラーを含む）、`apk-safety-final.log`（修正後8件成功）、`update-retention.log`。ログはGitに含めません。
+ローカルの実行記録：`final-insets-build.log`、`final-insets-tests.log`（表示修正後の入力・翻訳UI11件成功）、`emulator-final-integration.log`（翻訳エンジン1件の成功と修正前の試験環境エラーを含む）、`apk-safety-final.log`（修正後8件成功）、`update-retention.log`。ログはGitに含めません。
 
 ## 依頼書の40項目
 

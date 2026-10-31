@@ -10,6 +10,7 @@ import android.text.InputType
 import android.view.*
 import android.view.inputmethod.*
 import android.widget.Toast
+import androidx.core.view.WindowCompat
 import io.github.dualkey.core.*
 import io.github.user03715910.dualkey.*
 import io.github.user03715910.dualkey.data.*
@@ -63,7 +64,12 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             ImeControl.requests.value = null
         } } }
     }
-    override fun onCreateInputView(): View = KeyboardUi(this,::onScreenKey,::feedback).also { ui=it; rebuild(); refreshCandidates() }.root
+    override fun onCreateInputView(): View = KeyboardUi(this,::onScreenKey,::feedback).also { ui=it; rebuild(); refreshCandidates(); updateNavigationAppearance() }.root
+    override fun onWindowShown() { super.onWindowShown(); updateNavigationAppearance() }
+    private fun updateNavigationAppearance() {
+        window?.window?.let { w -> WindowCompat.getInsetsController(w,w.decorView).isAppearanceLightNavigationBars=
+            resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK != Configuration.UI_MODE_NIGHT_YES }
+    }
     override fun onEvaluateFullscreenMode() = false
     override fun onEvaluateInputViewShown(): Boolean {
         super.onEvaluateInputViewShown()

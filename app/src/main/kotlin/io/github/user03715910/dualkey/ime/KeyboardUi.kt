@@ -8,6 +8,8 @@ import android.graphics.Color
 import android.graphics.drawable.GradientDrawable
 import android.view.*
 import android.widget.*
+import androidx.core.view.ViewCompat
+import androidx.core.view.WindowInsetsCompat
 import io.github.dualkey.core.DisplayMode
 import io.github.user03715910.dualkey.R
 import io.github.user03715910.dualkey.data.Settings
@@ -32,7 +34,23 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         keys.visibility=if (showKeys && !translating) View.VISIBLE else View.GONE
     }
     private fun dp(v: Int) = (v * context.resources.displayMetrics.density).toInt()
-    init { root.setBackgroundColor(if (dark) Color.rgb(22,35,41) else Color.rgb(220,234,236)) }
+    init {
+        root.setBackgroundColor(if (dark) Color.rgb(22,35,41) else Color.rgb(220,234,236))
+        toolbar.isBaselineAligned=false
+        numberRow.isBaselineAligned=false
+        // The IME's own navigation controls are exposed as caption-bar insets on
+        // recent Android versions. Reserve system bars, never the IME's own inset.
+        ViewCompat.setOnApplyWindowInsetsListener(root) { view,insets ->
+            val safe=(ViewCompat.getRootWindowInsets(view) ?: insets)
+                .getInsets(WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.displayCutout())
+            view.setPadding(dp(4)+safe.left,dp(4),dp(4)+safe.right,dp(4)+safe.bottom)
+            insets
+        }
+        root.addOnAttachStateChangeListener(object: View.OnAttachStateChangeListener {
+            override fun onViewAttachedToWindow(v: View) { ViewCompat.requestApplyInsets(v) }
+            override fun onViewDetachedFromWindow(v: View) {}
+        })
+    }
     private fun decorate(v: TextView) {
         v.setTextColor(ink); v.isFocusable = false
         v.background = GradientDrawable().apply { setColor(keyColor); cornerRadius = dp(8).toFloat() }
@@ -62,7 +80,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         updateBody()
         if (mode != DisplayMode.FULL) return
         "1234567890".forEach { numberRow.addView(button(it.toString(),it.toString())) }
-        fun row(items: List<Pair<String,String>>) { keys.addView(LinearLayout(context).apply { orientation=LinearLayout.HORIZONTAL; items.forEach { addView(button(it.first,it.second)) } }) }
+        fun row(items: List<Pair<String,String>>) { keys.addView(LinearLayout(context).apply { orientation=LinearLayout.HORIZONTAL; isBaselineAligned=false; items.forEach { addView(button(it.first,it.second)) } }) }
         if (symbols) {
             listOf("! @ # $ % ^ & * ( )", "- _ = + [ ] { } / \\", "、 。 ー ・ 「 」 ？ ！ ： ；").forEach { line -> row(line.split(' ').map { it to it }) }
             row(listOf("戻る" to "symbols", "空白" to "space", "⌫" to "delete", "↵" to "enter"))
@@ -76,11 +94,11 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
                 listOf(listOf("た","ち","つ","て","と"),listOf("な","に","ぬ","ね","の"),listOf("は","ひ","ふ","へ","ほ")),
                 listOf(listOf("ま","み","む","め","も"),listOf("や","ゃ","ゆ","ゅ","よ"),listOf("ら","り","る","れ","ろ")))
             groups.forEach { group -> keys.addView(LinearLayout(context).apply {
-                orientation=LinearLayout.HORIZONTAL
+                orientation=LinearLayout.HORIZONTAL; isBaselineAligned=false
                 group.forEach { values -> addView(FlickKey(context,values,dp(settings.flickDp).toFloat(),feedback,callback,!sensitive).also(::decorate)) }
             }) }
             keys.addView(LinearLayout(context).apply {
-                orientation=LinearLayout.HORIZONTAL
+                orientation=LinearLayout.HORIZONTAL; isBaselineAligned=false
                 addView(button("記号", "symbols"))
                 addView(FlickKey(context,listOf("わ","を","ん","ー","〜"),dp(settings.flickDp).toFloat(),feedback,callback,!sensitive).also(::decorate))
                 addView(button("⌫", "delete"))

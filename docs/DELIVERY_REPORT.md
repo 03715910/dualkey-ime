@@ -36,6 +36,8 @@ Debug、署名Release、Android Test APKの生成に成功。JVMテスト11件�
 
 配布用のローカル成果物：`output/DualKeyIME-0.1.0.apk`（約67MB）。SHA-256は`output/SHA256SUMS.txt`にあります。アプリIDは`io.github.user03715910.dualkey`、versionCodeは1、Android 8.0以上です。今回専用のリリース鍵で署名し、v2/v3署名の検証に成功しています。
 
+操作画面の画像は`output/keyboard-preview.png`です（デバッグ版のエミュレーター）。
+
 通常のビルド出力は`app/build/outputs/apk/release/app-release.apk`、開発用は`app/build/outputs/apk/debug/app-debug.apk`です。開発用APKを正式配布しない構成です。
 
 ## 7・8. サイト・GitHub URL

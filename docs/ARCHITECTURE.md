@@ -12,6 +12,8 @@
 
 Samsungでの接続通知、ソフトキーボード設定、OSのショートカット先取りは端末ごとの実測が必要です。Ctrl+Alt+Kが常に届くとは仮定せず、アプリ画面とクイック設定タイルの復帰経路を設けています。
 
+画面下端は公開APIのWindowInsetsCompatでsystemBarsとdisplayCutoutを取得して避けています。IME自身のナビゲーションにはcaptionBarの領域も含まれるため、キーボード自身のimeインセットを再度余白に加えることはしません。[AOSPのナビゲーション領域処理](https://android.googlesource.com/platform/prebuilts/fullsdk/sources/+/refs/heads/androidx-constraintlayout-release/android-35/android/inputmethodservice/NavigationBarController.java)も確認し、エミュレーターの画像で重なりの解消を確認しました。
+
 ## Mozcを今回組み込まなかった理由
 
 [現行のAndroidビルド手順](https://github.com/google/mozc/blob/master/docs/build_mozc_for_android.md)はAndroid用`libmozc.so`のビルドを案内しています。Androidクライアントは廃止され、Linux/macOSでのビルドが検証対象です。Bazelisk、C++、Python 3.12以上、NDK r29などの別ツールチェーンが必要です。現環境のWindows/GradleアプリへAARを追加するだけの導入ではありません。
