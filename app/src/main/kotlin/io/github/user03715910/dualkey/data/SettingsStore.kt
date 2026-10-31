@@ -30,6 +30,7 @@ object Prefs {
     val japanesePrediction = booleanPreferencesKey("japanese_prediction")
     val englishPrediction = booleanPreferencesKey("english_prediction")
     val candidateCount = intPreferencesKey("candidate_count")
+    val learningEnabled = booleanPreferencesKey("japanese_learning_enabled")
     val dictionary = stringPreferencesKey("user_dictionary_json")
     val translateToEnglish = booleanPreferencesKey("translate_to_english")
     val autoCheck = booleanPreferencesKey("auto_check")
@@ -53,7 +54,8 @@ data class Settings(val p: Preferences = emptyPreferences()) {
     val ctrlSpace get() = p[Prefs.ctrlSpace] ?: true
     val japanesePrediction get() = p[Prefs.japanesePrediction] ?: true
     val englishPrediction get() = p[Prefs.englishPrediction] ?: true
-    val candidateCount get() = (p[Prefs.candidateCount] ?: 30).coerceIn(2,60)
+    val candidateCount get() = (p[Prefs.candidateCount] ?: 100).coerceIn(2,1000)
+    val learningEnabled get() = p[Prefs.learningEnabled] ?: true
     val toEnglish get() = p[Prefs.translateToEnglish] ?: true
     val autoCheck get() = p[Prefs.autoCheck] ?: true
     val autoDownload get() = p[Prefs.autoDownload] ?: false
@@ -67,6 +69,7 @@ data class Settings(val p: Preferences = emptyPreferences()) {
 
 class SettingsStore(private val context: Context, scope: CoroutineScope) {
     private val ready=CompletableDeferred<Unit>()
+    val isLoaded get() = ready.isCompleted
     private val snapshot=MutableStateFlow(Settings())
     val state: StateFlow<Settings> = snapshot.asStateFlow()
     init { scope.launch {

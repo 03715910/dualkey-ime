@@ -6,7 +6,7 @@
 
 画面キーと物理キー → `DualKeyService` → `Composer/Romaji` → 交換可能な`ConversionEngine` → `InputConnection`。
 
-ローマ字の未完部分はcomposing spanに保持します。変換中の候補インデックスと、ひらがな原文を分けます。英語予測もIME自身のcomposing spanだけを所有し、候補選択時に無関係な確定済み文章を削除しません。パスワード・数値入力をEditorInfoで判定します。自動学習や入力履歴を保存する処理はありません。
+ローマ字の未完部分はcomposing spanに保持します。変換中の候補インデックスと、ひらがな原文を分けます。英語予測もIME自身のcomposing spanだけを所有し、候補選択時に無関係な確定済み文章を削除しません。パスワード・数値入力をEditorInfoで判定します。0.1.5では日本語の確定した語句の学習を追加しました。読み・表記・使用回数・最終使用時刻を端末内のSQLiteへ保存し、頻度で候補を並べます。キー操作の履歴は記録せず、パスワード・学習禁止欄では読み書きとも無効にします。詳細は[学習とフリック](LEARNING_AND_FLICK.md)を参照してください。
 
 物理接続はInputManagerの非仮想・ALPHABETICなキーボードとConfigurationで検出します。表示状態は`VisibilityController`に集約します。完全非表示では`onEvaluateInputViewShown`と`requestHideSelf`を使い、候補専用の余分な領域も非表示にします。通常表示への復帰ではAPI28以上は`requestShowSelf`、API26–27だけ公式の旧APIを互換処理として使用します。公開API以外には依存しません。[InputMethodService公式](https://developer.android.com/reference/android/inputmethodservice/InputMethodService)
 

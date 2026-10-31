@@ -26,9 +26,12 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private val visibility = VisibilityController()
     private val conversion get() = app.japaneseDictionary.engine.value
     private data class CandidateQuery(val reading: String, val prediction: Boolean, val limit: Int,
-        val dictionary: Map<String, List<String>>, val engine: ConversionEngine)
+        val dictionary: Map<String, List<String>>, val engine: ConversionEngine, val learning: LearningSnapshot)
     private var candidateQuery: CandidateQuery? = null
     private var candidateJob: Job? = null
+    private var candidateLoading=false
+    private var requestedReading=""
+    private var requestedLimit=0
     private val translator = TranslationEngine()
     private var ui: KeyboardUi? = null
     private var english = false
@@ -37,8 +40,10 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var symbols = false
     private var sensitive = false
     private var predictionsAllowed = true
+    private var learningAllowed = false
     private var numeric = false
     private var candidates = emptyList<String>()
+    private var candidateRecords = emptyList<Candidate>()
     private var selected = -1
     private var converting = false
     private var englishWord = ""
@@ -56,6 +61,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         inputManager.registerInputDeviceListener(this, Handler(Looper.getMainLooper()))
         scope.launch { app.japaneseDictionary.engine.collect { refreshCandidates() } }
         scope.launch { app.japaneseDictionary.message.collect { ui?.dictionaryStatus(it) } }
+        scope.launch { app.learning.state.collect { refreshCandidates() } }
         scope.launch { app.settings.state.collect {
             if (lastPolicy!=null && lastPolicy!=it.policy) visibility.manual=null
             lastPolicy=it.policy
@@ -97,6 +103,9 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             (klass == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
         numeric = klass == InputType.TYPE_CLASS_NUMBER || klass == InputType.TYPE_CLASS_PHONE || klass == InputType.TYPE_CLASS_DATETIME
         predictionsAllowed = !sensitive && !numeric && type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0
+        learningAllowed = predictionsAllowed && klass==InputType.TYPE_CLASS_TEXT &&
+            attribute.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING==0 &&
+            variation !in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI)
         english = settings.initialEnglish || sensitive || numeric || (klass == InputType.TYPE_CLASS_TEXT &&
             variation in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI))
         shift=0; symbols=false
@@ -149,50 +158,68 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun invalidateTranslation() { revision++; translationJob?.cancel(); translationJob=null; ui?.hideTranslation() }
     private fun clearState() {
-        candidateJob?.cancel(); candidateQuery=null
-        invalidateTranslation(); composer.clear(); englishWord=""; candidates=emptyList(); selected=-1; converting=false
-        ui?.candidates(emptyList(),-1) {}
+        candidateJob?.cancel(); candidateQuery=null; candidateLoading=false; requestedReading=""; requestedLimit=0
+        invalidateTranslation(); composer.clear(); englishWord=""; candidates=emptyList(); candidateRecords=emptyList(); selected=-1; converting=false
+        ui?.candidates(emptyList(),-1,{})
     }
     private fun resetConversion() { selected=-1; converting=false }
     private fun refreshCandidates() {
         if (predictionsAllowed && !english && !composer.isEmpty && (converting || settings.japanesePrediction)) {
+            if (requestedReading!=composer.reading) { requestedReading=composer.reading; requestedLimit=settings.candidateCount }
             val query=CandidateQuery(composer.reading,!converting && settings.japanesePrediction,
-                settings.candidateCount,settings.dictionary,conversion)
+                maxOf(settings.candidateCount,requestedLimit),settings.dictionary,conversion,
+                if (app.settings.isLoaded && settings.learningEnabled && learningAllowed) app.learning.state.value else LearningSnapshot())
             if (candidateQuery!=query) {
-                candidateJob?.cancel(); candidateQuery=query
+                val retain=candidateQuery?.let { it.reading==query.reading && it.prediction==query.prediction }==true
+                candidateJob?.cancel(); candidateQuery=query; candidateLoading=false
                 if (converting) {
                     // Space/Enter stays ordered even when pressed immediately after typing.
-                    candidates=query.engine.candidates(query.reading,false,query.limit).map { it.text }
+                    setCandidateRecords(personalized(query))
                 } else {
-                    candidates=emptyList()
+                    if (!retain) setCandidateRecords(emptyList())
+                    candidateLoading=true
                     candidateJob=scope.launch {
                         delay(12)
-                        val values=withContext(Dispatchers.Default) {
-                            query.engine.candidates(query.reading,true,query.limit).map { it.text }
-                        }
+                        val values=withContext(Dispatchers.Default) { personalized(query) }
                         if (candidateQuery==query && inputStarted && !sensitive) {
-                            candidates=values; showCandidates()
+                            setCandidateRecords(values); candidateLoading=false; showCandidates()
                         }
                     }
                 }
             }
         } else {
-            candidateJob?.cancel(); candidateQuery=null
-            candidates=if (predictionsAllowed && english && settings.englishPrediction)
-                EnglishPrediction.candidates(englishWord,settings.candidateCount) else emptyList()
+            candidateJob?.cancel(); candidateQuery=null; candidateLoading=false; requestedReading=""; requestedLimit=0
+            setCandidateRecords(if (predictionsAllowed && english && settings.englishPrediction)
+                EnglishPrediction.candidates(englishWord,settings.candidateCount).map { Candidate(it,it.lowercase()) } else emptyList())
         }
         showCandidates()
     }
+    private fun personalized(query: CandidateQuery): List<Candidate> = Personalization.candidates(query.reading,
+        query.engine.candidates(query.reading,query.prediction,query.limit),query.learning.entries,query.prediction,query.limit)
+    private fun setCandidateRecords(values: List<Candidate>) {
+        val chosen=if (converting) candidateRecords.getOrNull(selected)?.text else null
+        candidateRecords=values; candidates=values.map { it.text }
+        if (chosen!=null) selected=candidates.indexOf(chosen)
+    }
     private fun showCandidates() {
         if (selected >= candidates.size) selected=-1
-        ui?.candidates(candidates,selected,::commitCandidate)
+        val canExpand=candidateQuery?.let { it.limit<1000 && candidates.size>=it.limit }==true
+        ui?.candidates(candidates,selected,::commitCandidate,canExpand,candidateLoading)
+    }
+    private fun moreCandidates() {
+        if (candidateLoading || composer.isEmpty || sensitive || english) return
+        requestedLimit=(maxOf(requestedLimit,settings.candidateCount)+100).coerceAtMost(1000)
+        refreshCandidates()
     }
     private fun syncComposition() {
         currentInputConnection?.setComposingText(if (converting && selected in candidates.indices) candidates[selected] else composer.text,1)
         refreshCandidates()
     }
-    private fun commitComposition() {
-        if (!composer.isEmpty) currentInputConnection?.commitText(if (converting && selected in candidates.indices) candidates[selected] else composer.reading,1)
+    private fun commitComposition(learn: Boolean=false) {
+        if (!composer.isEmpty) {
+            val candidate=if (converting && selected in candidateRecords.indices) candidateRecords[selected] else Candidate(composer.reading,composer.reading)
+            if (currentInputConnection?.commitText(candidate.text,1)==true && learn) learnConfirmed(candidate)
+        }
         composer.clear(); resetConversion(); refreshCandidates()
     }
     private fun commitCandidate(index: Int) {
@@ -202,9 +229,15 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             // English prediction owns a composing span, so no unrelated committed text is removed.
             currentInputConnection?.commitText(candidates[index],1); englishWord=""
         } else {
-            currentInputConnection?.commitText(candidates[index],1); composer.clear()
+            val candidate=candidateRecords[index]
+            if (currentInputConnection?.commitText(candidate.text,1)==true) learnConfirmed(candidate)
+            composer.clear()
         }
         resetConversion(); refreshCandidates()
+    }
+    private fun learnConfirmed(candidate: Candidate) {
+        if (learningAllowed && settings.learningEnabled && !sensitive && !numeric && !english)
+            app.learning.record(candidate.reading,candidate.text)
     }
     private fun type(value: String) {
         invalidateTranslation()
@@ -215,7 +248,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 currentInputConnection?.setComposingText(englishWord,1)
             } else { finishEnglish(); currentInputConnection?.commitText(value,1) }
         } else {
-            if (converting) commitComposition()
+            if (converting) commitComposition(true)
             composer.append(value); resetConversion(); currentInputConnection?.setComposingText(composer.text,1)
         }
         refreshCandidates()
@@ -233,7 +266,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun enter() {
         invalidateTranslation()
-        if (!composer.isEmpty) { commitComposition(); return }
+        if (!composer.isEmpty) { commitComposition(true); return }
         finishEnglish(); refreshCandidates()
         val info=currentInputEditorInfo
         if (info?.actionLabel != null && info.actionId != 0) currentInputConnection?.performEditorAction(info.actionId)
@@ -269,6 +302,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun onScreenKey(key: String) {
         when (key) {
+            "more_candidates" -> moreCandidates()
             "mode" -> switchMode()
             "full" -> chooseDisplay(DisplayMode.FULL)
             "compact" -> chooseDisplay(DisplayMode.COMPACT)

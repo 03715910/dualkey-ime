@@ -113,6 +113,7 @@ class MainActivity : AppCompatActivity() {
             promptOnAvailable=app.settings.state.value.autoCheck && page!=Page.UPDATES && !intent.getBooleanExtra("restore_keyboard",false)
             selectPage(page)
             launch { app.updates.state.collect { renderUpdate(it) } }
+            launch { app.learning.message.collect { message -> pageContent.findViewWithTag<TextView>("learning_status")?.text=message } }
             if (!app.updates.state.value.busy) app.updates.restoreCached()
             resumeInstallationFlow()
             if (intent.getBooleanExtra("restore_keyboard",false)) restoreKeyboard()
@@ -294,14 +295,24 @@ class MainActivity : AppCompatActivity() {
         section("予測候補") {
             toggle("日本語の予測候補",Prefs.japanesePrediction,s.japanesePrediction)
             toggle("英語の予測候補",Prefs.englishPrediction,s.englishPrediction)
-            slider("候補の数",Prefs.candidateCount,s.candidateCount,2,60)
-            text("候補欄は左右にスクロールできます。右端の「一覧」でまとめて選べます。")
+            slider("最初に検索する候補数",Prefs.candidateCount,s.candidateCount,2,1000)
+            text("「一覧」で50件ずつ表示し、さらに検索できます。最大1,000件まで選べます。")
+        }
+        section("変換の学習") {
+            toggle("よく使う日本語の変換を学習",Prefs.learningEnabled,s.learningEnabled)
+            text("確定した語句の読み・表記・使用回数と最終使用時刻を端末内に保存し、よく使うものを変換・予測の上位に表示します。パスワードや学習禁止の入力欄では保存・利用しません。")
+            text(app.learning.message.value).tag="learning_status"
+            button("学習データを削除") {
+                AlertDialog.Builder(this).setTitle("学習データを削除しますか？")
+                    .setMessage("学習した候補と使用回数を削除します。手動で登録したユーザー辞書は残ります。")
+                    .setPositiveButton("削除") { _,_ -> app.learning.clear() }.setNegativeButton("戻る",null).show()
+            }
         }
         section("ユーザー辞書","追加した単語は端末内に保存します。") {
             text("登録した読み：${s.dictionary.size}件",16f)
             button("単語を追加",true) { addWord() }
             button("登録した単語を確認・削除") { dictionary() }
-            text("約108万組の読みと表記を持つオフライン辞書を使用します。文のつながりと複数候補に対応します。")
+            text("約120万組の読みと表記、約5万字の単漢字に対応するオフライン辞書を使用します。字形の表示は端末のフォントにも依存します。")
             text(app.japaneseDictionary.message.value)
         }
     }
@@ -358,15 +369,15 @@ class MainActivity : AppCompatActivity() {
     private fun about() {
         heading("アプリについて","DualKey IME ${BuildConfig.VERSION_NAME}")
         section("入力とプライバシー") {
-            text("入力文章を独自サーバーへ送信しません。キー入力をログや履歴に保存しません。パスワード欄では予測・翻訳・未確定プレビューを無効にします。",16f)
-            text("通信はアプリ更新、翻訳モデル取得、Google ML Kitの利用状況・診断通信に使います。翻訳文は端末内で処理します。入力履歴は保存せず、ユーザー辞書には自分で追加した単語だけを保存します。")
+            text("入力文章を独自サーバーへ送信しません。キー操作の履歴は記録しません。パスワード欄では予測・学習・翻訳・未確定プレビューを無効にします。",16f)
+            text("通信はアプリ更新、翻訳モデル取得、Google ML Kitの利用状況・診断通信に使います。変換と翻訳文は端末内で処理します。学習ON時は確定した語句の読み・表記・使用回数・最終使用時刻を端末内に保存します。「変換と辞書」で停止・削除できます。")
             text("アンインストールすると設定と辞書が消えます。更新はアンインストールせずに行ってください。")
         }
         section("利用技術と動作確認") {
             text("Android 8.0以上 / バージョン ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
             text("Mozcの公開辞書データを使う独自の変換処理です。Mozc本体ではなく、長文や固有名詞の変換には限界があります。Samsung実機・Bluetooth/USBの実接続は追加確認が必要です。")
             button("ライセンスを表示") {
-                val notices=listOf("NOTICE.txt","japanese/LICENSE-MOZC.txt","japanese/LICENSE-DICTIONARY.txt")
+                val notices=listOf("NOTICE.txt","japanese/LICENSE-MOZC.txt","japanese/LICENSE-DICTIONARY.txt","japanese/LICENSE-UNICODE.txt")
                     .joinToString("\n\n") { name -> assets.open(name).bufferedReader().use { it.readText() } }
                 AlertDialog.Builder(this).setTitle("ライセンス・利用技術").setMessage(notices).setPositiveButton("閉じる",null).show()
             }

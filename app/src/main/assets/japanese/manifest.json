@@ -3,13 +3,20 @@
   "source": "google/mozc",
   "revision": "e5f1494923a0a624d01f19c50d57bbdfa03ea5ba",
   "sourceRows": 1289076,
-  "readings": 745963,
-  "entries": 1284972,
-  "readingSurfacePairs": 1085292,
+  "readings": 746734,
+  "entries": 1397157,
+  "readingSurfacePairs": 1197477,
   "matrixDimension": 2672,
-  "bytes": 73598370,
-  "sha256": "debbdfa56440840d1ddd37a002e50eb6e3eff287dcff3eff48e373d9e6d25b39",
-  "compressedBytes": 23428846,
+  "bytes": 75135116,
+  "baseReadingSurfacePairs": 1085292,
+  "supplementalReadingSurfacePairs": 112185,
+  "baseSingleKanji": 3466,
+  "singleKanji": 51669,
+  "supplementalSources": {
+    "https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip": "f7a48b2b545acfaa77b2d607ae28747404ce02baefee16396c5d2d7a8ef34b5e"
+  },
+  "sha256": "006e995f360b582fa8192f1c108eb7759c5b4deec62dfc04d348975f03b11873",
+  "compressedBytes": 24158267,
   "sources": {
     "src/data/dictionary_oss/dictionary00.txt": "9e07ce292932c4fff327ed8cb06274c09acca556bd8bdf7c7ef1f6173eae3b61",
     "src/data/dictionary_oss/dictionary01.txt": "836fd5fd8399510de0d8ef7b33be913cca6bbaee7b712cc8045fba03f4c75a89",
@@ -25,6 +32,8 @@
     "src/data/dictionary_oss/id.def": "07a05a268c3783b7e02b36e4aa591555a2dd19a1f3c93891576740761c154f2d",
     "src/data/dictionary_oss/dictionary_filter.tsv": "802f2c76516bf1bbb30cd501cc343abf59aa179d3f98917297d961fb9921a2fb",
     "src/data/dictionary_oss/README.txt": "6b1de66bc6fa30e0b45dc45b8c8f6c57bd78aff923c261a3efffac8eb86f7bac",
-    "LICENSE": "44cdd923b91ea9199293abecc2762c70c87dbf1e581c027a94c416368d1a648c"
+    "LICENSE": "44cdd923b91ea9199293abecc2762c70c87dbf1e581c027a94c416368d1a648c",
+    "src/data/single_kanji/single_kanji.tsv": "bfa6a4be1319a144f770ba281dfc04091a05320e334357f949b293dc5f9c3d0c",
+    "src/data/single_kanji/variant_rule.txt": "d8b0f3194eebde623709e76f642c7479f7a5b0611cfeea2fd99a6eef15eeed27"
   }
 }

@@ -75,10 +75,10 @@ class JapaneseLexicon private constructor(private val data: ByteBuffer) {
         }
         return start until low
     }
-    fun exact(reading: String): List<LexiconWord> {
+    fun exact(reading: String, limit: Int = 2000): List<LexiconWord> {
         val bytes = reading.toByteArray(Charsets.UTF_8)
         val matches = range(bytes)
-        return if (!matches.isEmpty() && short(keys + matches.first * 12 + 4) == bytes.size) words(matches.first) else emptyList()
+        return if (!matches.isEmpty() && short(keys + matches.first * 12 + 4) == bytes.size) words(matches.first,limit) else emptyList()
     }
     fun prefixes(input: String, start: Int): List<LexiconMatch> {
         val result = ArrayList<LexiconMatch>()

@@ -50,7 +50,7 @@ class DeviceInputTest {
         }
         assertEquals(component,android.provider.Settings.Secure.getString(instrumentation.targetContext.contentResolver,"default_input_method"))
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
-        runBlocking { app.settings.awaitLoaded(); app.settings.set(Prefs.initialEnglish,false); app.settings.set(Prefs.hardwarePolicy,"AUTO"); app.settings.set(Prefs.shortcut,true); app.settings.set(Prefs.englishPrediction,true); app.settings.set(Prefs.japanesePrediction,true); app.settings.set(Prefs.candidateCount,30); app.settings.set(Prefs.numberRow,true); app.settings.set(Prefs.keyHeight,40); app.settings.set(Prefs.heightPercent,100)
+        runBlocking { app.settings.awaitLoaded(); app.settings.set(Prefs.learningEnabled,false); app.settings.set(Prefs.initialEnglish,false); app.settings.set(Prefs.hardwarePolicy,"AUTO"); app.settings.set(Prefs.shortcut,true); app.settings.set(Prefs.englishPrediction,true); app.settings.set(Prefs.japanesePrediction,true); app.settings.set(Prefs.candidateCount,30); app.settings.set(Prefs.numberRow,true); app.settings.set(Prefs.keyHeight,40); app.settings.set(Prefs.heightPercent,100)
             withTimeout(30_000) { app.japaneseDictionary.engine.first { it is DictionaryConversionEngine } }
         }
         activity=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
@@ -118,6 +118,96 @@ class DeviceInputTest {
         letters("KYOUHA"); await("きょうは") { inputText()=="きょうは" }
         key(KeyEvent.KEYCODE_SPACE); await("今日は") { inputText()=="今日は" }
         key(KeyEvent.KEYCODE_ENTER); assertEquals("今日は",inputText())
+    }
+    @Test fun learnedChoiceMovesToTopAndIsIgnoredInPrivateEditors() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking {
+            app.settings.set(Prefs.learningEnabled,true); app.settings.state.first { it.learningEnabled }
+            app.learning.awaitLoaded(); val before=app.learning.state.value.revision; app.learning.clear()
+            withTimeout(10_000) { app.learning.state.first { it.revision>before && it.entries.isEmpty() } }
+        }
+        letters("KANJI"); await("writing candidate") { findNode { it.text?.toString()=="漢字" }!=null }
+        clickLabel("漢字"); await("confirmed spelling") { inputText()=="漢字" }
+        runBlocking { withTimeout(10_000) { app.learning.state.first { it.entries.any { e -> e.reading=="かんじ" && e.text=="漢字" } } } }
+        main { editor.text.clear() }
+        letters("KANJI"); key(KeyEvent.KEYCODE_SPACE); assertEquals("漢字",inputText())
+        key(KeyEvent.KEYCODE_ESCAPE); key(KeyEvent.KEYCODE_ESCAPE)
+        // A real second editor makes Android deliver an actual private EditorInfo.
+        main {
+            val privateEditor=EditText(activity).apply {
+                inputType=InputType.TYPE_CLASS_TEXT
+                imeOptions=android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+            }
+            activity.findViewById<android.widget.LinearLayout>(R.id.page_content).addView(privateEditor)
+            editor=privateEditor; editor.requestFocus()
+            activity.getSystemService(InputMethodManager::class.java).showSoftInput(editor,0)
+        }
+        await("private editor served") { var active=false; main { active=activity.getSystemService(InputMethodManager::class.java).isActive(editor) }; active }
+        letters("KANJI"); key(KeyEvent.KEYCODE_SPACE); assertEquals("感じ",inputText())
+        await("private alternate") { findNode { it.text?.toString()=="漢字" }!=null }
+        clickLabel("漢字"); SystemClock.sleep(300)
+        assertEquals(1,app.learning.state.value.entries.first { it.reading=="かんじ" && it.text=="漢字" }.count)
+    }
+    @Test fun candidatePagesCanShowMoreThanSixtyChoices() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.candidateCount,1000); app.settings.state.first { it.candidateCount==1000 } }
+        letters("KOU"); key(KeyEvent.KEYCODE_SPACE); touch(rect("一覧"))
+        await("first 50 choices") { findNode { it.text?.toString()=="50 / 1000件" }!=null }
+        var more: AccessibilityNodeInfo?=null
+        repeat(20) {
+            if (more==null) {
+                more=findNode { it.contentDescription?.toString()=="さらに候補を表示" && it.isVisibleToUser }
+                if (more==null) {
+                    findNode { it.className?.toString()=="android.widget.ScrollView" }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                    SystemClock.sleep(120)
+                }
+            }
+        }
+        assertNotNull("A page action is reachable by scrolling",more)
+        assertTrue(more!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        await("more than sixty displayed") { findNode { it.text?.toString()=="100 / 1000件" }!=null }
+    }
+    @Test fun legacyCandidateLimitCanSearchForMore() {
+        letters("KOU"); key(KeyEvent.KEYCODE_SPACE); touch(rect("一覧"))
+        await("original thirty choices") { findNode { it.text?.toString()=="30 / 30件" }!=null }
+        var more: AccessibilityNodeInfo?=null
+        repeat(20) {
+            if (more==null) {
+                more=findNode { it.contentDescription?.toString()=="さらに候補を表示" && it.isVisibleToUser }
+                if (more==null) {
+                    findNode { it.className?.toString()=="android.widget.ScrollView" }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                    SystemClock.sleep(120)
+                }
+            }
+        }
+        assertNotNull(more); assertTrue(more!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        await("search grows beyond the old saved setting") { findNode { it.text?.toString()=="50 / 130件" }!=null }
+    }
+    @Test fun diamondFlickBubbleIsVisibleAndTracksTheDirection() {
+        val key=rect("か行"); val density=activity.resources.displayMetrics.density
+        val now=SystemClock.uptimeMillis(); val x=key.exactCenterX(); val y=key.exactCenterY()
+        fun inject(action: Int,xv: Float,yv: Float) {
+            val event=MotionEvent.obtain(now,SystemClock.uptimeMillis(),action,xv,yv,0).apply { source=InputDevice.SOURCE_TOUCHSCREEN }
+            instrumentation.uiAutomation.injectInputEvent(event,true); event.recycle(); instrumentation.waitForIdleSync()
+        }
+        fun snapshot(name: String,left: Boolean) {
+            SystemClock.sleep(200)
+            val bitmap=instrumentation.uiAutomation.takeScreenshot()
+            val folder=java.io.File(instrumentation.targetContext.getExternalFilesDir(null),"preview").apply { mkdirs() }
+            java.io.File(folder,name).outputStream().use { bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }
+            val bubbleX=(x-74*density).coerceIn(4*density,bitmap.width-152*density)
+            val bubbleY=(key.top-154*density).coerceAtLeast(4*density)
+            val sx=(bubbleX+74*density+(if (left) -39.44f else 0f)*density+12*density).toInt()
+            val sy=(bubbleY+74*density).toInt()
+            val color=bitmap.getPixel(sx,sy); bitmap.recycle()
+            assertEquals("The selected preview cell is drawn above the key",android.graphics.Color.rgb(8,127,140),color)
+        }
+        try {
+            inject(MotionEvent.ACTION_DOWN,x,y); snapshot("flick-ka-center.png",false)
+            inject(MotionEvent.ACTION_MOVE,x-100*density,y); snapshot("flick-ka-left.png",true)
+            inject(MotionEvent.ACTION_UP,x-100*density,y)
+            await("left flick committed") { inputText()=="き" }
+        } finally { inject(MotionEvent.ACTION_CANCEL,x,y) }
     }
     @Test fun feelingPhraseAndExpandedKanjiChoices() {
         letters("IIKANJI")

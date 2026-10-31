@@ -14,15 +14,17 @@ import re
 import struct
 import sys
 import urllib.request
+import zipfile
 
 ROOT = Path(__file__).resolve().parents[1]
 REVISION = 'e5f1494923a0a624d01f19c50d57bbdfa03ea5ba'
 FILES = [f'src/data/dictionary_oss/dictionary{i:02}.txt' for i in range(10)] + [
     'src/data/dictionary_oss/' + p for p in (
         'connection_single_column.txt', 'id.def', 'dictionary_filter.tsv', 'README.txt')
-] + ['LICENSE']
+] + ['LICENSE', 'src/data/single_kanji/single_kanji.tsv', 'src/data/single_kanji/variant_rule.txt']
 CACHE = ROOT / '.local/mozc-source'
 OUTPUT = ROOT / 'app/src/main/assets/japanese'
+UNIHAN_URL = 'https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip'
 
 
 def fetch(path):
@@ -58,6 +60,64 @@ def build():
             if not key or not value or any(a.fullmatch(key) and b.fullmatch(value) for a, b in filters):
                 continue
             groups.setdefault(key, set()).add((value, int(left), int(right), int(cost)))
+    base_pairs = sum(len({e[0] for e in entries}) for entries in groups.values())
+    base_kanji = {value for entries in groups.values() for value, *_ in entries
+                  if len(value) == 1 and ('\u3400' <= value <= '\u9fff' or ord(value) >= 0x20000)}
+    supplements = {}
+    for line in (CACHE / 'single_kanji.tsv').read_text(encoding='utf-8').splitlines():
+        columns = line.split('\t')
+        if len(columns) >= 2:
+            key, characters = columns[:2]
+            supplements.setdefault(key, []).extend(characters)
+    archive = CACHE / 'Unihan-17.0.0.zip'
+    if not archive.exists():
+        archive.write_bytes(urllib.request.urlopen(UNIHAN_URL, timeout=90).read())
+    license_path = CACHE / 'LICENSE-UNICODE.txt'
+    if not license_path.exists():
+        license_path.write_bytes(urllib.request.urlopen('https://www.unicode.org/license.txt', timeout=60).read())
+    unihan = zipfile.ZipFile(archive).read('Unihan_Readings.txt').decode('utf-8')
+    for line in unihan.splitlines():
+        if not line or line.startswith('#'):
+            continue
+        code, field, readings = line.split('\t')
+        if field != 'kJapanese':
+            continue
+        character = chr(int(code[2:], 16))
+        for reading in readings.split():
+            if not re.fullmatch('[ぁ-ゖァ-ヶー]{1,32}', reading):
+                continue
+            key = ''.join(chr(ord(c) - 0x60) if 'ァ' <= c <= 'ヶ' else c for c in reading)
+            supplements.setdefault(key, []).append(character)
+    # Share Japanese readings with documented glyph variants. Include the common
+    # tsuchiyoshi alias explicitly: Unihan's kJapanese currently lists よい, not よし.
+    variants = [('𠮷', '吉')]
+    for line in (CACHE / 'variant_rule.txt').read_text(encoding='utf-8').splitlines():
+        if '\t' in line and not line.startswith('#'):
+            variant, original = line.split('\t')[:2]
+            if len(variant) == len(original) == 1:
+                variants.append((variant, original))
+    readings_by_character = {}
+    for key, entries in groups.items():
+        for value, *_ in entries:
+            if len(value) == 1:
+                readings_by_character.setdefault(value, set()).add(key)
+    for key, characters in list(supplements.items()):
+        for character in characters:
+            readings_by_character.setdefault(character, set()).add(key)
+    for variant, original in variants:
+        for key in sorted(readings_by_character.get(original, ())):
+            supplements.setdefault(key, []).append(variant)
+    supplement_pairs = 0
+    for key, characters in supplements.items():
+        entries = groups.setdefault(key, set())
+        existing = {e[0] for e in entries}
+        for rank, character in enumerate(dict.fromkeys(characters)):
+            if character in existing:
+                continue
+            # Keep uncommon single kanji behind ordinary words, but searchable.
+            entries.add((character, 1851, 1851, min(24000, 12000 + rank * 4)))
+            existing.add(character); supplement_pairs += 1
+    all_kanji = base_kanji | {c for values in supplements.values() for c in values}
     keys = sorted(groups, key=lambda k: k.encode('utf-8'))
     with (CACHE / 'connection_single_column.txt').open() as stream:
         dimension = int(next(stream))
@@ -133,13 +193,17 @@ def build():
                 compressed.write(chunk)
     manifest = dict(format=1, source='google/mozc', revision=REVISION, sourceRows=source_count,
                     readings=len(keys), entries=entry_count, readingSurfacePairs=unique_pairs,
-                    matrixDimension=dimension, bytes=size,
+                    matrixDimension=dimension, bytes=size, baseReadingSurfacePairs=base_pairs,
+                    supplementalReadingSurfacePairs=supplement_pairs,
+                    baseSingleKanji=len(base_kanji), singleKanji=len(all_kanji),
+                    supplementalSources={UNIHAN_URL: hashlib.sha256(archive.read_bytes()).hexdigest()},
                     sha256=hashlib.file_digest(raw_path.open('rb'), 'sha256').hexdigest(),
                     compressedBytes=(OUTPUT / 'lexicon.dklz').stat().st_size,
                     sources=source_hashes)
     (OUTPUT / 'manifest.json').write_text(json.dumps(manifest, indent=2) + '\n', encoding='utf-8')
     (OUTPUT / 'LICENSE-MOZC.txt').write_bytes((CACHE / 'LICENSE').read_bytes().rstrip(b'\r\n') + b'\n')
     (OUTPUT / 'LICENSE-DICTIONARY.txt').write_bytes((CACHE / 'README.txt').read_bytes().rstrip(b'\r\n') + b'\n')
+    (OUTPUT / 'LICENSE-UNICODE.txt').write_bytes(license_path.read_bytes().rstrip(b'\r\n') + b'\n')
     print(json.dumps({k: v for k, v in manifest.items() if k != 'sources'}, indent=2))
 
 

@@ -26,6 +26,8 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     private val expandedScroll = root.findViewById<ScrollView>(R.id.candidate_expanded_scroll)
     private val expandedCandidates = root.findViewById<LinearLayout>(R.id.candidate_expanded)
     private var candidateExpanded = false
+    private var expandedVisibleCount=50
+    private var previousCandidates=emptyList<String>()
     private var dictionaryHint = "日本語フリック"
     private val numberRow = root.findViewById<LinearLayout>(R.id.number_row)
     private val keys = root.findViewById<LinearLayout>(R.id.key_area)
@@ -53,7 +55,10 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         toolbar.isBaselineAligned=false
         numberRow.isBaselineAligned=false
         candidateExpand.setTextColor(ink)
-        candidateExpand.setBackgroundColor(if (dark) Color.rgb(22,35,41) else Color.rgb(220,234,236))
+        candidateExpand.background=GradientDrawable().apply {
+            setColor(if (dark) Color.rgb(22,35,41) else Color.rgb(220,234,236))
+            setStroke(dp(1),if (dark) Color.rgb(91,119,127) else Color.rgb(158,187,191)); cornerRadius=dp(5).toFloat()
+        }
         candidateExpand.setSingleLine(true)
         candidateExpand.isFocusable=false
         // The IME's own navigation controls are exposed as caption-bar insets on
@@ -154,7 +159,9 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             })
         }
     }
-    fun candidates(values: List<String>, selected: Int, select: (Int) -> Unit) {
+    fun candidates(values: List<String>, selected: Int, select: (Int) -> Unit, canLoadMore: Boolean=false, loading: Boolean=false) {
+        if (values.take(3)!=previousCandidates.take(3)) expandedVisibleCount=50
+        previousCandidates=values
         candidateStrip.removeAllViews()
         expandedCandidates.removeAllViews()
         candidateExpand.visibility=if (values.isEmpty()) View.GONE else View.VISIBLE
@@ -162,14 +169,15 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         candidateExpand.setOnClickListener {
             feedback(candidateExpand)
             candidateExpanded=!candidateExpanded
-            if (candidateExpanded) populateExpanded(values,selected,select)
+            if (candidateExpanded) populateExpanded(values,selected,select,canLoadMore,loading)
             expandedScroll.layoutParams.height=dp(if (showKeys) 4*(keyHeight+4)+(if (showNumbers) numberHeight+4 else 0) else 160)
             expandedScroll.scrollTo(0,0); updateBody()
         }
         if (values.isEmpty()) {
             candidateStrip.addView(TextView(context).apply { tag="candidate_placeholder"; text=if (englishMode) "English" else dictionaryHint; textSize=12f; setTextColor(ink); gravity=Gravity.CENTER_VERTICAL; includeFontPadding=false; setPadding(dp(8),0,0,0) })
         }
-        values.forEachIndexed { i,s -> candidateStrip.addView(TextView(context).apply {
+        val first=if (selected>=12) maxOf(0,selected-4) else 0
+        (first until minOf(values.size,first+12)).forEach { i -> val s=values[i]; candidateStrip.addView(TextView(context).apply {
             text=s; textSize=17f; includeFontPadding=false; setSingleLine(true); setTextColor(if (selected==i) Color.WHITE else ink); gravity=Gravity.CENTER
             setPadding(dp(14),0,dp(14),0)
             layoutParams=LinearLayout.LayoutParams(LinearLayout.LayoutParams.WRAP_CONTENT,LinearLayout.LayoutParams.MATCH_PARENT)
@@ -177,12 +185,13 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             isFocusable=false; setOnClickListener { select(i) }
             if (selected==i) post { (candidateStrip.parent as HorizontalScrollView).smoothScrollTo(left,0) }
         }) }
-        if (candidateExpanded) populateExpanded(values,selected,select)
+        if (candidateExpanded) populateExpanded(values,selected,select,canLoadMore,loading)
         updateBody()
     }
-    private fun populateExpanded(values: List<String>, selected: Int, select: (Int)->Unit) {
+    private fun populateExpanded(values: List<String>, selected: Int, select: (Int)->Unit, canLoadMore: Boolean, loading: Boolean) {
         expandedCandidates.removeAllViews()
-        values.chunked(2).forEachIndexed { rowIndex, row ->
+        if (selected>=expandedVisibleCount) expandedVisibleCount=((selected/50)+1)*50
+        values.take(expandedVisibleCount).chunked(2).forEachIndexed { rowIndex, row ->
             val layout=LinearLayout(context).apply { orientation=LinearLayout.HORIZONTAL; isBaselineAligned=false }
             row.forEachIndexed { column, value ->
                 val index=rowIndex*2+column
@@ -196,6 +205,19 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             }
             expandedCandidates.addView(layout)
         }
+        expandedCandidates.addView(TextView(context).apply {
+            text="${minOf(expandedVisibleCount,values.size)} / ${values.size}件"; textSize=12f; setTextColor(ink)
+            gravity=Gravity.CENTER; setPadding(0,dp(6),0,dp(6))
+        })
+        if (expandedVisibleCount<values.size || canLoadMore || loading) expandedCandidates.addView(TextView(context).apply {
+            text=when { loading -> "候補を検索しています…"; expandedVisibleCount<values.size -> "次の50件を表示"; else -> "さらに候補を検索" }
+            contentDescription="さらに候補を表示"; textSize=16f; setTextColor(ink); gravity=Gravity.CENTER
+            minHeight=dp(48); setPadding(dp(8),dp(8),dp(8),dp(8)); setBackgroundColor(functionColor); isEnabled=!loading; isFocusable=false
+            setOnClickListener {
+                if (expandedVisibleCount<values.size) { expandedVisibleCount+=50; populateExpanded(values,selected,select,canLoadMore,false) }
+                else callback("more_candidates")
+            }
+        },LinearLayout.LayoutParams(-1,-2).apply { setMargins(dp(2),dp(4),dp(2),dp(8)) })
     }
     fun dictionaryStatus(message: String) {
         dictionaryHint=if (message=="日本語辞書の準備完了") "日本語フリック" else message

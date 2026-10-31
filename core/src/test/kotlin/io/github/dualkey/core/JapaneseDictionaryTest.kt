@@ -31,6 +31,15 @@ class JapaneseDictionaryTest {
         assertTrue(homophones.toString(), homophones.containsAll(listOf("感じ", "漢字", "幹事", "監事")))
         assertTrue("Multiple spellings are reachable", words("こうしょう", limit = 60).size >= 20)
     }
+    @Test fun hundredsOfChoicesAndRareSingleKanjiRemainReachable() {
+        val many=words("こう",false,1000)
+        println("Single-kanji/word choices for こう: ${many.size}")
+        assertTrue("More than the previous 60 choices: ${many.size}",many.size>100)
+        assertTrue(words("よし",false,1000).toString(),"𠮷" in words("よし",false,1000))
+        assertTrue(words("たか",false,1000).toString(),"髙" in words("たか",false,1000))
+        val completion=engine.candidates("いいかん",true,100).first { it.text=="いい感じ" }
+        assertEquals("いいかんじ",completion.reading)
+    }
     @Test fun feelingPhraseAndSentenceAlternatives() {
         for (reading in listOf("いいかんじ", "いいかんじです", "かんじがいい", "きょうはいいてんきです", "にほんごをべんきょうします")) {
             println("$reading: ${words(reading).take(10)}")
