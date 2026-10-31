@@ -3,7 +3,7 @@
     android:orientation="vertical" android:padding="4dp">
     <LinearLayout android:id="@+id/toolbar" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" />
     <LinearLayout android:layout_width="match_parent" android:layout_height="32dp" android:orientation="horizontal">
-    <HorizontalScrollView android:id="@+id/candidate_scroll" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:fillViewport="true" android:scrollbars="horizontal">
+    <HorizontalScrollView android:id="@+id/candidate_scroll" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:fillViewport="true" android:scrollbars="horizontal" android:clipChildren="true" android:clipToPadding="true">
         <LinearLayout android:id="@+id/candidate_strip" android:orientation="horizontal" android:layout_width="wrap_content" android:layout_height="match_parent" />
     </HorizontalScrollView>
     <TextView android:id="@+id/candidate_expand" android:layout_width="48dp" android:layout_height="match_parent" android:gravity="center" android:text="一覧" android:textSize="13sp" android:contentDescription="変換候補を一覧表示" android:visibility="gone" />

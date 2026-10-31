@@ -53,6 +53,8 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         toolbar.isBaselineAligned=false
         numberRow.isBaselineAligned=false
         candidateExpand.setTextColor(ink)
+        candidateExpand.setBackgroundColor(if (dark) Color.rgb(22,35,41) else Color.rgb(220,234,236))
+        candidateExpand.setSingleLine(true)
         candidateExpand.isFocusable=false
         // The IME's own navigation controls are exposed as caption-bar insets on
         // recent Android versions. Reserve system bars, never the IME's own inset.
