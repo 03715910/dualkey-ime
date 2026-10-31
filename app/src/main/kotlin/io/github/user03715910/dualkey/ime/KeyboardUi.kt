@@ -28,7 +28,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     private var candidateExpanded = false
     private var expandedVisibleCount=50
     private var previousCandidates=emptyList<String>()
-    private var dictionaryHint = "日本語フリック"
+    private var dictionaryNotice = ""
     private val numberRow = root.findViewById<LinearLayout>(R.id.number_row)
     private val keys = root.findViewById<LinearLayout>(R.id.key_area)
     val translationPanel: LinearLayout = root.findViewById(R.id.translation_panel)
@@ -113,7 +113,8 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         keyHeight = (settings.keyHeight * settings.heightPercent / 100).coerceIn(24,maxRow)
         numberHeight=desiredNumber.coerceAtMost((keyHeight-4).coerceAtLeast(18))
         toolbar.removeAllViews()
-        toolbar.addView(button(if (english) "EN" else "あ", "mode", true))
+        toolbar.addView(button(if (english) "EN" else "日本語", "mode", true,
+            description=if (english) "日本語に切り替え" else "英語に切り替え"))
         toolbar.addView(button(if (mode == DisplayMode.COMPACT) "全表示" else "縮小", if (mode == DisplayMode.COMPACT) "full" else "compact", true,
             description=if (mode == DisplayMode.COMPACT) "画面キーボードを全表示" else "省スペース表示"))
         toolbar.addView(button("⌄", "hide", true, description="キーボードを隠す"))
@@ -123,6 +124,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         numberRow.removeAllViews(); keys.removeAllViews()
         showNumbers=mode==DisplayMode.FULL && settings.numberRow
         showKeys=mode==DisplayMode.FULL
+        if (previousCandidates.isEmpty()) renderEmptyCandidates()
         updateBody()
         if (mode != DisplayMode.FULL) return
         "1234567890".forEach { numberRow.addView(button(it.toString(),it.toString()).apply {
@@ -173,9 +175,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             expandedScroll.layoutParams.height=dp(if (showKeys) 4*(keyHeight+4)+(if (showNumbers) numberHeight+4 else 0) else 160)
             expandedScroll.scrollTo(0,0); updateBody()
         }
-        if (values.isEmpty()) {
-            candidateStrip.addView(TextView(context).apply { tag="candidate_placeholder"; text=if (englishMode) "English" else dictionaryHint; textSize=12f; setTextColor(ink); gravity=Gravity.CENTER_VERTICAL; includeFontPadding=false; setPadding(dp(8),0,0,0) })
-        }
+        if (values.isEmpty()) renderEmptyCandidates()
         val first=if (selected>=12) maxOf(0,selected-4) else 0
         (first until minOf(values.size,first+12)).forEach { i -> val s=values[i]; candidateStrip.addView(TextView(context).apply {
             text=s; textSize=17f; includeFontPadding=false; setSingleLine(true); setTextColor(if (selected==i) Color.WHITE else ink); gravity=Gravity.CENTER
@@ -191,20 +191,38 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     private fun populateExpanded(values: List<String>, selected: Int, select: (Int)->Unit, canLoadMore: Boolean, loading: Boolean) {
         expandedCandidates.removeAllViews()
         if (selected>=expandedVisibleCount) expandedVisibleCount=((selected/50)+1)*50
-        values.take(expandedVisibleCount).chunked(2).forEachIndexed { rowIndex, row ->
-            val layout=LinearLayout(context).apply { orientation=LinearLayout.HORIZONTAL; isBaselineAligned=false }
-            row.forEachIndexed { column, value ->
-                val index=rowIndex*2+column
-                layout.addView(TextView(context).apply {
+        val availableWidth=((root.width.takeIf { it>0 } ?: context.resources.displayMetrics.widthPixels)-root.paddingLeft-root.paddingRight).coerceAtLeast(1)
+        val columns=(availableWidth/dp(80).coerceAtLeast(1)).coerceIn(3,6)
+        val cellWidth=availableWidth.toFloat()/columns
+        val grid=GridLayout(context).apply {
+            columnCount=columns; isFocusable=false
+            layoutParams=LinearLayout.LayoutParams(-1,-2)
+        }
+        var row=0
+        var column=0
+        values.take(expandedVisibleCount).forEachIndexed { index, value ->
+            val item=TextView(context).apply {
                     text=value; contentDescription="候補 ${index+1}：$value"; textSize=16f; setTextColor(if (selected==index) Color.WHITE else ink)
-                    gravity=Gravity.CENTER_VERTICAL; minHeight=dp(44); maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END
-                    setPadding(dp(10),dp(6),dp(10),dp(6)); isFocusable=false
+                    gravity=Gravity.CENTER_VERTICAL; minHeight=dp(38); maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END; includeFontPadding=false
+                    setPadding(dp(6),dp(4),dp(6),dp(4)); isFocusable=false
                     setBackgroundColor(if (selected==index) Color.rgb(8,127,140) else keyColor)
                     setOnClickListener { candidateExpanded=false; updateBody(); select(index) }
-                },LinearLayout.LayoutParams(0,-2,1f).apply { setMargins(dp(2),dp(2),dp(2),dp(2)) })
             }
-            expandedCandidates.addView(layout)
+            // Short words share a row; phrases reserve enough adjacent cells.
+            // Measuring in pixels also respects the user's font-size setting.
+            val span=kotlin.math.ceil((item.paint.measureText(value)+dp(14))/cellWidth).toInt().coerceIn(1,columns)
+            if (column+span>columns) { row++; column=0 }
+            grid.addView(item,GridLayout.LayoutParams(
+                GridLayout.spec(row,GridLayout.FILL),GridLayout.spec(column,span,GridLayout.FILL)
+            ).apply {
+                width=((column+span)*cellWidth).toInt()-(column*cellWidth).toInt()-2*dp(1)
+                height=GridLayout.LayoutParams.WRAP_CONTENT
+                setMargins(dp(1),dp(1),dp(1),dp(1))
+            })
+            column+=span
+            if (column==columns) { row++; column=0 }
         }
+        expandedCandidates.addView(grid)
         expandedCandidates.addView(TextView(context).apply {
             text="${minOf(expandedVisibleCount,values.size)} / ${values.size}件"; textSize=12f; setTextColor(ink)
             gravity=Gravity.CENTER; setPadding(0,dp(6),0,dp(6))
@@ -220,8 +238,16 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         },LinearLayout.LayoutParams(-1,-2).apply { setMargins(dp(2),dp(4),dp(2),dp(8)) })
     }
     fun dictionaryStatus(message: String) {
-        dictionaryHint=if (message=="日本語辞書の準備完了") "日本語フリック" else message
-        (candidateStrip.findViewWithTag<View>("candidate_placeholder") as? TextView)?.let { if (!englishMode) it.text=dictionaryHint }
+        dictionaryNotice=if (message=="日本語辞書の準備完了") "" else message
+        if (previousCandidates.isEmpty()) renderEmptyCandidates()
+        updateBody()
+    }
+    private fun renderEmptyCandidates() {
+        candidateStrip.removeAllViews()
+        if (!englishMode && dictionaryNotice.isNotEmpty()) candidateStrip.addView(TextView(context).apply {
+            text=dictionaryNotice; textSize=12f; setTextColor(ink); gravity=Gravity.CENTER_VERTICAL; includeFontPadding=false
+            setSingleLine(true); ellipsize=android.text.TextUtils.TruncateAt.END; setPadding(dp(8),0,0,0)
+        })
     }
     fun showTranslation(message: String, actions: List<Pair<String,()->Unit>>, attribution: Boolean = false) {
         translationPanel.removeAllViews(); translationPanel.visibility=View.VISIBLE

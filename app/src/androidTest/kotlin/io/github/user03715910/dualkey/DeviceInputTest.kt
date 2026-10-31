@@ -284,7 +284,7 @@ class DeviceInputTest {
         assertEquals("あいうえおく1234567890",inputText())
     }
     @Test fun englishQwertyAndShiftCapsLock() {
-        touch(rect("あ")); touch(rect("h")); touch(rect("e")); touch(rect("l")); assertEquals("hel",inputText())
+        touch(rect("日本語")); touch(rect("h")); touch(rect("e")); touch(rect("l")); assertEquals("hel",inputText())
         touch(rect("⇧")); touch(rect("A")); touch(rect("b")); assertEquals("helAb",inputText())
         val shift=rect("⇧"); touch(shift); touch(shift)
         touch(rect("C")); touch(rect("D")); assertEquals("helAbCD",inputText())
