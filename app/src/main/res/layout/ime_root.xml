@@ -2,9 +2,15 @@
     android:id="@+id/ime_root" android:layout_width="match_parent" android:layout_height="wrap_content"
     android:orientation="vertical" android:padding="4dp">
     <LinearLayout android:id="@+id/toolbar" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" />
-    <HorizontalScrollView android:id="@+id/candidate_scroll" android:layout_width="match_parent" android:layout_height="32dp" android:fillViewport="true" android:scrollbars="none">
+    <LinearLayout android:layout_width="match_parent" android:layout_height="32dp" android:orientation="horizontal">
+    <HorizontalScrollView android:id="@+id/candidate_scroll" android:layout_width="0dp" android:layout_weight="1" android:layout_height="match_parent" android:fillViewport="true" android:scrollbars="horizontal">
         <LinearLayout android:id="@+id/candidate_strip" android:orientation="horizontal" android:layout_width="wrap_content" android:layout_height="match_parent" />
     </HorizontalScrollView>
+    <TextView android:id="@+id/candidate_expand" android:layout_width="48dp" android:layout_height="match_parent" android:gravity="center" android:text="一覧" android:textSize="13sp" android:contentDescription="変換候補を一覧表示" android:visibility="gone" />
+    </LinearLayout>
+    <ScrollView android:id="@+id/candidate_expanded_scroll" android:layout_width="match_parent" android:layout_height="200dp" android:visibility="gone">
+        <LinearLayout android:id="@+id/candidate_expanded" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
+    </ScrollView>
     <LinearLayout android:id="@+id/number_row" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" />
     <LinearLayout android:id="@+id/key_area" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" />
     <LinearLayout android:id="@+id/translation_panel" android:orientation="vertical" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content" />

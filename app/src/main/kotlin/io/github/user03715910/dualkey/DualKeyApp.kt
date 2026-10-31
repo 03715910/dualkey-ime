@@ -2,6 +2,7 @@ package io.github.user03715910.dualkey
 
 import android.app.Application
 import io.github.user03715910.dualkey.data.SettingsStore
+import io.github.user03715910.dualkey.conversion.JapaneseDictionary
 import io.github.user03715910.dualkey.update.UpdateScheduler
 import io.github.user03715910.dualkey.update.UpdateRepository
 import kotlinx.coroutines.*
@@ -12,9 +13,11 @@ class DualKeyApp : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     lateinit var settings: SettingsStore; private set
     val updates by lazy { UpdateRepository(this) }
+    lateinit var japaneseDictionary: JapaneseDictionary; private set
     override fun onCreate() {
         super.onCreate()
         settings = SettingsStore(this, scope)
+        japaneseDictionary = JapaneseDictionary(this, scope) { settings.state.value.dictionary }
         scope.launch { settings.awaitLoaded(); settings.state.map { it.autoCheck }.distinctUntilChanged().collect { UpdateScheduler.schedule(this@DualKeyApp, it) } }
     }
 }

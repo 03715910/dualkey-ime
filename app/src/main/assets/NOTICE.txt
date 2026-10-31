@@ -16,7 +16,15 @@ https://developers.google.com/ml-kit/android-data-disclosure
 Translation model acquisition and diagnostics can communicate with Google. Translation text is processed on device.
 Translations may contain inaccuracies. Google Translate attribution applies to translation results.
 
-Mozc is NOT included. The bundled small Japanese and English dictionaries were written for this project. No third-party keyboard artwork or dictionaries were copied.
+Japanese vocabulary and POS connection-cost data are derived from google/mozc,
+revision e5f1494923a0a624d01f19c50d57bbdfa03ea5ba.
+https://github.com/google/mozc
+Copyright 2010-2018 Google Inc. BSD 3-Clause and the dictionary's IPAdic/ICOT/Okinawa terms apply.
+Full original notices are bundled in japanese/LICENSE-MOZC.txt and japanese/LICENSE-DICTIONARY.txt
+and displayed in the app's license information. The converted data format, indexes,
+and Kotlin sentence/prediction engine were written for DualKey. Native Mozc is not included.
+The small emergency Japanese fallback and English prediction list were written for this project.
+No third-party keyboard artwork was copied.
 This service may contain translations powered by Google. Google disclaims all warranties related to the translations, express or implied, including any warranties of accuracy, reliability, and any implied warranties of merchantability, fitness for a particular purpose and noninfringement.
 
 The unmodified Google Translate attribution badge is obtained from:

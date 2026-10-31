@@ -14,13 +14,13 @@ Samsungでの接続通知、ソフトキーボード設定、OSのショート�
 
 画面下端は公開APIのWindowInsetsCompatでsystemBarsとdisplayCutoutを取得して避けています。IME自身のナビゲーションにはcaptionBarの領域も含まれるため、キーボード自身のimeインセットを再度余白に加えることはしません。[AOSPのナビゲーション領域処理](https://android.googlesource.com/platform/prebuilts/fullsdk/sources/+/refs/heads/androidx-constraintlayout-release/android-35/android/inputmethodservice/NavigationBarController.java)も確認し、エミュレーターの画像で重なりの解消を確認しました。
 
-## Mozcを今回組み込まなかった理由
+## Mozc本体を組み込まなかった理由
 
 [現行のAndroidビルド手順](https://github.com/google/mozc/blob/master/docs/build_mozc_for_android.md)はAndroid用`libmozc.so`のビルドを案内しています。Androidクライアントは廃止され、Linux/macOSでのビルドが検証対象です。Bazelisk、C++、Python 3.12以上、NDK r29などの別ツールチェーンが必要です。現環境のWindows/GradleアプリへAARを追加するだけの導入ではありません。
 
 コードはBSD 3-Clauseが基本ですが、辞書・第三者コードの条件は別々の確認が必要です。[MozcのREADMEとライセンス説明](https://github.com/google/mozc)
 
-今回の優先範囲は入力と安全な配布の成立なので、純Kotlinの簡易辞書を採用しました。JNIアダプター、protobufセッション、辞書データの配置、ABI別ネイティブビルド、ライセンス同梱、非同期候補処理を追加して`ConversionEngine`を差し替える予定です。Mozcの実際の起動時間・変換速度・メモリ・ストレージ増加量は、ビルド未実施のため未計測です。根拠のない容量値や性能値は示しません。
+最初は入力と安全な配布を優先し、純Kotlinの簡易辞書を採用しました。0.1.4ではMozcの公開辞書データを同梱し、品詞接続を使う独自のKotlin変換・予測処理へ差し替えました。約108万組の読みと表記、読み索引、予測索引を使用します。辞書の展開・ハッシュ確認と通常の予測は背景で処理します。詳細は[日本語辞書](JAPANESE_DICTIONARY.md)を参照してください。Mozcのネイティブエンジン自体はビルド・同梱していません。
 
 ## 翻訳
 

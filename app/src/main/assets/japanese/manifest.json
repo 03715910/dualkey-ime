@@ -1,0 +1,30 @@
+{
+  "format": 1,
+  "source": "google/mozc",
+  "revision": "e5f1494923a0a624d01f19c50d57bbdfa03ea5ba",
+  "sourceRows": 1289076,
+  "readings": 745963,
+  "entries": 1284972,
+  "readingSurfacePairs": 1085292,
+  "matrixDimension": 2672,
+  "bytes": 73598370,
+  "sha256": "debbdfa56440840d1ddd37a002e50eb6e3eff287dcff3eff48e373d9e6d25b39",
+  "compressedBytes": 23428846,
+  "sources": {
+    "src/data/dictionary_oss/dictionary00.txt": "9e07ce292932c4fff327ed8cb06274c09acca556bd8bdf7c7ef1f6173eae3b61",
+    "src/data/dictionary_oss/dictionary01.txt": "836fd5fd8399510de0d8ef7b33be913cca6bbaee7b712cc8045fba03f4c75a89",
+    "src/data/dictionary_oss/dictionary02.txt": "93943858d0cfd092b849a78def6901eaf228177e1ac5663544e865a3a1e45a9e",
+    "src/data/dictionary_oss/dictionary03.txt": "cb9f1b0b4a7550d682d86244a021cd17e0b15366328819e69135b5f183a1a24b",
+    "src/data/dictionary_oss/dictionary04.txt": "9fdc4e3948d03463de13ab5782adffbc11dd06e934cb80138c5920029cd3d2f6",
+    "src/data/dictionary_oss/dictionary05.txt": "199e3b0f050b691823ae7ba943090d437f51af6436b27c5f3dc69cafa12000e4",
+    "src/data/dictionary_oss/dictionary06.txt": "b95b14f7770ae2a824bc8e9fad8b03c1bc45c504f93a36554b8b56daa0368d2a",
+    "src/data/dictionary_oss/dictionary07.txt": "7f53649b529d4c8c495d3a8dd9c4d489dfe7696080f7423107ff01331174be48",
+    "src/data/dictionary_oss/dictionary08.txt": "50a31bb5fc1646721b00be371a5695dffab1292bda143e1e59cc70cbbdd8643f",
+    "src/data/dictionary_oss/dictionary09.txt": "4e5fcd4cbfbf11395166a37b506f547fc54d20edc0884f5184ecd3fc705f0d9a",
+    "src/data/dictionary_oss/connection_single_column.txt": "68823a1f6617372ccb89afdbcb334d7a0bcfa82c9c5dda03fc1f80f1cab5c48e",
+    "src/data/dictionary_oss/id.def": "07a05a268c3783b7e02b36e4aa591555a2dd19a1f3c93891576740761c154f2d",
+    "src/data/dictionary_oss/dictionary_filter.tsv": "802f2c76516bf1bbb30cd501cc343abf59aa179d3f98917297d961fb9921a2fb",
+    "src/data/dictionary_oss/README.txt": "6b1de66bc6fa30e0b45dc45b8c8f6c57bd78aff923c261a3efffac8eb86f7bac",
+    "LICENSE": "44cdd923b91ea9199293abecc2762c70c87dbf1e581c027a94c416368d1a648c"
+  }
+}

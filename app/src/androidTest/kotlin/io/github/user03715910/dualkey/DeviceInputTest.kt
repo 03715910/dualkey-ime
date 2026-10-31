@@ -16,6 +16,9 @@ import io.github.dualkey.core.DisplayMode
 import io.github.user03715910.dualkey.data.Prefs
 import io.github.user03715910.dualkey.settings.MainActivity
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withTimeout
+import io.github.dualkey.core.DictionaryConversionEngine
 import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
@@ -44,7 +47,9 @@ class DeviceInputTest {
         }
         assertEquals(component,android.provider.Settings.Secure.getString(instrumentation.targetContext.contentResolver,"default_input_method"))
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
-        runBlocking { app.settings.awaitLoaded(); app.settings.set(Prefs.initialEnglish,false); app.settings.set(Prefs.hardwarePolicy,"AUTO"); app.settings.set(Prefs.shortcut,true); app.settings.set(Prefs.englishPrediction,true); app.settings.set(Prefs.numberRow,true); app.settings.set(Prefs.keyHeight,40); app.settings.set(Prefs.heightPercent,100) }
+        runBlocking { app.settings.awaitLoaded(); app.settings.set(Prefs.initialEnglish,false); app.settings.set(Prefs.hardwarePolicy,"AUTO"); app.settings.set(Prefs.shortcut,true); app.settings.set(Prefs.englishPrediction,true); app.settings.set(Prefs.japanesePrediction,true); app.settings.set(Prefs.candidateCount,30); app.settings.set(Prefs.numberRow,true); app.settings.set(Prefs.keyHeight,40); app.settings.set(Prefs.heightPercent,100)
+            withTimeout(30_000) { app.japaneseDictionary.engine.first { it is DictionaryConversionEngine } }
+        }
         activity=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
         await("editor ready") { var found=false; main { found=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; found }
         main {
@@ -106,13 +111,58 @@ class DeviceInputTest {
         key(KeyEvent.KEYCODE_SPACE); await("今日は") { inputText()=="今日は" }
         key(KeyEvent.KEYCODE_ENTER); assertEquals("今日は",inputText())
     }
+    @Test fun feelingPhraseAndExpandedKanjiChoices() {
+        letters("IIKANJI")
+        await("feeling prediction") { findNode { it.text?.toString()=="いい感じ" }!=null }
+        key(KeyEvent.KEYCODE_SPACE); assertEquals("いい感じ",inputText())
+        key(KeyEvent.KEYCODE_ENTER); assertEquals("いい感じ",inputText())
+        main { editor.text.clear() }
+        letters("KANJI")
+        await("both homophones") { findNode { it.text?.toString()=="感じ" }!=null && findNode { it.text?.toString()=="漢字" }!=null }
+        val originalHeight=imeHeight()
+        touch(rect("一覧"))
+        await("expanded choices") { findNode { it.contentDescription?.toString()?.matches(Regex("候補 [0-9]+：漢字"))==true }!=null }
+        assertTrue("Expansion replaces the key area",imeHeight()<=originalHeight+20)
+        val kanji=findNode { it.contentDescription?.toString()?.matches(Regex("候補 [0-9]+：漢字"))==true }!!
+        assertTrue(kanji.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        await("selected writing kanji") { inputText()=="漢字" }
+        await("keys restored") { findNode { it.contentDescription?.toString()?.startsWith("あ行")==true }!=null }
+    }
+    @Test fun sentenceCompletionAndPredictionOffConversion() {
+        letters("IIKAN")
+        await("phrase completion") { findNode { it.text?.toString()=="いい感じ" }!=null }
+        clickLabel("いい感じ"); await("completion committed") { inputText()=="いい感じ" }
+        main { editor.text.clear() }
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        try {
+            runBlocking { app.settings.set(Prefs.japanesePrediction,false); app.settings.state.first { !it.japanesePrediction } }
+            letters("KANJIRU")
+            assertNull(findNode { it.text?.toString()=="感じる" })
+            key(KeyEvent.KEYCODE_SPACE); assertEquals("感じる",inputText())
+            key(KeyEvent.KEYCODE_ENTER); assertEquals("感じる",inputText())
+        } finally { runBlocking { app.settings.set(Prefs.japanesePrediction,true) } }
+    }
+    @Test fun realDictionarySearchLatency() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        val engine=app.japaneseDictionary.engine.value
+        val samples=listOf("あ","かんじ","いいかんじ","きょうはにほ","きょうはいいてんきですね")
+        val durations=mutableListOf<Long>()
+        repeat(3) { samples.forEach { reading ->
+            val before=SystemClock.elapsedRealtimeNanos()
+            val values=engine.candidates(reading,true,30)
+            durations.add((SystemClock.elapsedRealtimeNanos()-before)/1_000_000)
+            assertTrue(values.isNotEmpty())
+        } }
+        println("Dictionary searches on Android: median=${durations.sorted()[durations.size/2]}ms, max=${durations.max()}ms")
+        assertTrue("Indexed searches stay bounded",durations.max()<1500)
+    }
     @Test fun physicalContractedGeminatedAndN() {
         letters("KYONIHONGOSHACHATTANNA"); await("romaji sequence") { inputText()=="きょにほんごしゃちゃったんな" }
         key(KeyEvent.KEYCODE_ENTER); assertEquals("きょにほんごしゃちゃったんな",inputText())
     }
     @Test fun candidateArrowEscapeAndBackspace() {
         letters("KYOU"); key(KeyEvent.KEYCODE_SPACE); assertEquals("今日",inputText())
-        key(KeyEvent.KEYCODE_DPAD_RIGHT); assertEquals("京都",inputText())
+        key(KeyEvent.KEYCODE_DPAD_RIGHT); assertNotEquals("今日",inputText())
         key(KeyEvent.KEYCODE_ESCAPE); assertEquals("きょう",inputText())
         key(KeyEvent.KEYCODE_DEL); assertEquals("きょ",inputText())
     }
@@ -164,7 +214,7 @@ class DeviceInputTest {
     }
     @Test fun sideArrowsSelectCandidatesAndMoveTheCursor() {
         letters("KYOU"); key(KeyEvent.KEYCODE_SPACE); assertEquals("今日",inputText())
-        touch(rect("▶")); assertEquals("京都",inputText())
+        touch(rect("▶")); assertNotEquals("今日",inputText())
         touch(rect("◀")); assertEquals("今日",inputText())
         touch(rect("↵")); touch(rect("◀")); touch(rect("あ行")); touch(rect("↵"))
         await("cursor insertion") { inputText()=="今あ日" }

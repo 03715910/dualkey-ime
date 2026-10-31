@@ -22,6 +22,11 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     val root = LayoutInflater.from(context).inflate(R.layout.ime_root, null) as LinearLayout
     private val toolbar = root.findViewById<LinearLayout>(R.id.toolbar)
     private val candidateStrip = root.findViewById<LinearLayout>(R.id.candidate_strip)
+    private val candidateExpand = root.findViewById<TextView>(R.id.candidate_expand)
+    private val expandedScroll = root.findViewById<ScrollView>(R.id.candidate_expanded_scroll)
+    private val expandedCandidates = root.findViewById<LinearLayout>(R.id.candidate_expanded)
+    private var candidateExpanded = false
+    private var dictionaryHint = "日本語フリック"
     private val numberRow = root.findViewById<LinearLayout>(R.id.number_row)
     private val keys = root.findViewById<LinearLayout>(R.id.key_area)
     val translationPanel: LinearLayout = root.findViewById(R.id.translation_panel)
@@ -36,14 +41,19 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     private var showKeys=false
     private fun updateBody() {
         val translating=translationPanel.visibility==View.VISIBLE
-        numberRow.visibility=if (showNumbers && !translating) View.VISIBLE else View.GONE
-        keys.visibility=if (showKeys && !translating) View.VISIBLE else View.GONE
+        numberRow.visibility=if (showNumbers && !translating && !candidateExpanded) View.VISIBLE else View.GONE
+        keys.visibility=if (showKeys && !translating && !candidateExpanded) View.VISIBLE else View.GONE
+        expandedScroll.visibility=if (candidateExpanded && !translating) View.VISIBLE else View.GONE
+        candidateExpand.text=if (candidateExpanded) "閉じる" else "一覧"
+        candidateExpand.contentDescription=if (candidateExpanded) "変換候補の一覧を閉じる" else "変換候補を一覧表示"
     }
     private fun dp(v: Int) = (v * context.resources.displayMetrics.density).toInt()
     init {
         root.setBackgroundColor(if (dark) Color.rgb(22,35,41) else Color.rgb(220,234,236))
         toolbar.isBaselineAligned=false
         numberRow.isBaselineAligned=false
+        candidateExpand.setTextColor(ink)
+        candidateExpand.isFocusable=false
         // The IME's own navigation controls are exposed as caption-bar insets on
         // recent Android versions. Reserve system bars, never the IME's own inset.
         ViewCompat.setOnApplyWindowInsetsListener(root) { view,insets ->
@@ -84,6 +94,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         setOnClickListener { feedback(this); callback(action) }
     }
     fun rebuild(settings: Settings, english: Boolean, shift: Int, mode: DisplayMode, symbols: Boolean, sensitive: Boolean) {
+        candidateExpanded=false
         englishMode=english
         // Four key rows in either language. Give digits their own shorter height.
         val screen=context.resources.configuration
@@ -143,8 +154,18 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     }
     fun candidates(values: List<String>, selected: Int, select: (Int) -> Unit) {
         candidateStrip.removeAllViews()
+        expandedCandidates.removeAllViews()
+        candidateExpand.visibility=if (values.isEmpty()) View.GONE else View.VISIBLE
+        if (values.isEmpty()) candidateExpanded=false
+        candidateExpand.setOnClickListener {
+            feedback(candidateExpand)
+            candidateExpanded=!candidateExpanded
+            if (candidateExpanded) populateExpanded(values,selected,select)
+            expandedScroll.layoutParams.height=dp(if (showKeys) 4*(keyHeight+4)+(if (showNumbers) numberHeight+4 else 0) else 160)
+            expandedScroll.scrollTo(0,0); updateBody()
+        }
         if (values.isEmpty()) {
-            candidateStrip.addView(TextView(context).apply { text=if (englishMode) "English" else "日本語フリック"; textSize=12f; setTextColor(ink); gravity=Gravity.CENTER_VERTICAL; includeFontPadding=false; setPadding(dp(8),0,0,0) })
+            candidateStrip.addView(TextView(context).apply { tag="candidate_placeholder"; text=if (englishMode) "English" else dictionaryHint; textSize=12f; setTextColor(ink); gravity=Gravity.CENTER_VERTICAL; includeFontPadding=false; setPadding(dp(8),0,0,0) })
         }
         values.forEachIndexed { i,s -> candidateStrip.addView(TextView(context).apply {
             text=s; textSize=17f; includeFontPadding=false; setSingleLine(true); setTextColor(if (selected==i) Color.WHITE else ink); gravity=Gravity.CENTER
@@ -154,6 +175,29 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             isFocusable=false; setOnClickListener { select(i) }
             if (selected==i) post { (candidateStrip.parent as HorizontalScrollView).smoothScrollTo(left,0) }
         }) }
+        if (candidateExpanded) populateExpanded(values,selected,select)
+        updateBody()
+    }
+    private fun populateExpanded(values: List<String>, selected: Int, select: (Int)->Unit) {
+        expandedCandidates.removeAllViews()
+        values.chunked(2).forEachIndexed { rowIndex, row ->
+            val layout=LinearLayout(context).apply { orientation=LinearLayout.HORIZONTAL; isBaselineAligned=false }
+            row.forEachIndexed { column, value ->
+                val index=rowIndex*2+column
+                layout.addView(TextView(context).apply {
+                    text=value; contentDescription="候補 ${index+1}：$value"; textSize=16f; setTextColor(if (selected==index) Color.WHITE else ink)
+                    gravity=Gravity.CENTER_VERTICAL; minHeight=dp(44); maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END
+                    setPadding(dp(10),dp(6),dp(10),dp(6)); isFocusable=false
+                    setBackgroundColor(if (selected==index) Color.rgb(8,127,140) else keyColor)
+                    setOnClickListener { candidateExpanded=false; updateBody(); select(index) }
+                },LinearLayout.LayoutParams(0,-2,1f).apply { setMargins(dp(2),dp(2),dp(2),dp(2)) })
+            }
+            expandedCandidates.addView(layout)
+        }
+    }
+    fun dictionaryStatus(message: String) {
+        dictionaryHint=if (message=="日本語辞書の準備完了") "日本語フリック" else message
+        (candidateStrip.findViewWithTag<View>("candidate_placeholder") as? TextView)?.let { if (!englishMode) it.text=dictionaryHint }
     }
     fun showTranslation(message: String, actions: List<Pair<String,()->Unit>>, attribution: Boolean = false) {
         translationPanel.removeAllViews(); translationPanel.visibility=View.VISIBLE

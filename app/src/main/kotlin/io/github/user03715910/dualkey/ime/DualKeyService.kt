@@ -24,7 +24,11 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private val settings get() = app.settings.state.value
     private val composer = Composer()
     private val visibility = VisibilityController()
-    private val conversion = LocalConversionEngine { settings.dictionary }
+    private val conversion get() = app.japaneseDictionary.engine.value
+    private data class CandidateQuery(val reading: String, val prediction: Boolean, val limit: Int,
+        val dictionary: Map<String, List<String>>, val engine: ConversionEngine)
+    private var candidateQuery: CandidateQuery? = null
+    private var candidateJob: Job? = null
     private val translator = TranslationEngine()
     private var ui: KeyboardUi? = null
     private var english = false
@@ -50,6 +54,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         super.onCreate()
         inputManager = getSystemService(InputManager::class.java)
         inputManager.registerInputDeviceListener(this, Handler(Looper.getMainLooper()))
+        scope.launch { app.japaneseDictionary.engine.collect { refreshCandidates() } }
+        scope.launch { app.japaneseDictionary.message.collect { ui?.dictionaryStatus(it) } }
         scope.launch { app.settings.state.collect {
             if (lastPolicy!=null && lastPolicy!=it.policy) visibility.manual=null
             lastPolicy=it.policy
@@ -64,7 +70,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             ImeControl.requests.value = null
         } } }
     }
-    override fun onCreateInputView(): View = KeyboardUi(this,::onScreenKey,::feedback).also { ui=it; rebuild(); refreshCandidates(); updateNavigationAppearance() }.root
+    override fun onCreateInputView(): View = KeyboardUi(this,::onScreenKey,::feedback).also { ui=it; it.dictionaryStatus(app.japaneseDictionary.message.value); rebuild(); refreshCandidates(); updateNavigationAppearance() }.root
     override fun onWindowShown() { super.onWindowShown(); updateNavigationAppearance() }
     private fun updateNavigationAppearance() {
         window?.window?.let { w -> WindowCompat.getInsetsController(w,w.decorView).isAppearanceLightNavigationBars=
@@ -143,18 +149,41 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun invalidateTranslation() { revision++; translationJob?.cancel(); translationJob=null; ui?.hideTranslation() }
     private fun clearState() {
+        candidateJob?.cancel(); candidateQuery=null
         invalidateTranslation(); composer.clear(); englishWord=""; candidates=emptyList(); selected=-1; converting=false
         ui?.candidates(emptyList(),-1) {}
     }
     private fun resetConversion() { selected=-1; converting=false }
     private fun refreshCandidates() {
-        candidates = when {
-            !predictionsAllowed -> emptyList()
-            english -> if (settings.englishPrediction) EnglishPrediction.candidates(englishWord,settings.candidateCount) else emptyList()
-            composer.isEmpty -> emptyList()
-            converting || settings.japanesePrediction -> conversion.candidates(composer.reading,!converting && settings.japanesePrediction,settings.candidateCount).map { it.text }
-            else -> emptyList()
+        if (predictionsAllowed && !english && !composer.isEmpty && (converting || settings.japanesePrediction)) {
+            val query=CandidateQuery(composer.reading,!converting && settings.japanesePrediction,
+                settings.candidateCount,settings.dictionary,conversion)
+            if (candidateQuery!=query) {
+                candidateJob?.cancel(); candidateQuery=query
+                if (converting) {
+                    // Space/Enter stays ordered even when pressed immediately after typing.
+                    candidates=query.engine.candidates(query.reading,false,query.limit).map { it.text }
+                } else {
+                    candidates=emptyList()
+                    candidateJob=scope.launch {
+                        delay(12)
+                        val values=withContext(Dispatchers.Default) {
+                            query.engine.candidates(query.reading,true,query.limit).map { it.text }
+                        }
+                        if (candidateQuery==query && inputStarted && !sensitive) {
+                            candidates=values; showCandidates()
+                        }
+                    }
+                }
+            }
+        } else {
+            candidateJob?.cancel(); candidateQuery=null
+            candidates=if (predictionsAllowed && english && settings.englishPrediction)
+                EnglishPrediction.candidates(englishWord,settings.candidateCount) else emptyList()
         }
+        showCandidates()
+    }
+    private fun showCandidates() {
         if (selected >= candidates.size) selected=-1
         ui?.candidates(candidates,selected,::commitCandidate)
     }

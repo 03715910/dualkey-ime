@@ -294,13 +294,15 @@ class MainActivity : AppCompatActivity() {
         section("予測候補") {
             toggle("日本語の予測候補",Prefs.japanesePrediction,s.japanesePrediction)
             toggle("英語の予測候補",Prefs.englishPrediction,s.englishPrediction)
-            slider("候補の数",Prefs.candidateCount,s.candidateCount,2,30)
+            slider("候補の数",Prefs.candidateCount,s.candidateCount,2,60)
+            text("候補欄は左右にスクロールできます。右端の「一覧」でまとめて選べます。")
         }
         section("ユーザー辞書","追加した単語は端末内に保存します。") {
             text("登録した読み：${s.dictionary.size}件",16f)
             button("単語を追加",true) { addWord() }
             button("登録した単語を確認・削除") { dictionary() }
-            text("現在は基本辞書による簡易変換です。変換できる単語には限りがあります。")
+            text("約108万組の読みと表記を持つオフライン辞書を使用します。文のつながりと複数候補に対応します。")
+            text(app.japaneseDictionary.message.value)
         }
     }
     private fun translationSettings() {
@@ -357,14 +359,16 @@ class MainActivity : AppCompatActivity() {
         heading("アプリについて","DualKey IME ${BuildConfig.VERSION_NAME}")
         section("入力とプライバシー") {
             text("入力文章を独自サーバーへ送信しません。キー入力をログや履歴に保存しません。パスワード欄では予測・翻訳・未確定プレビューを無効にします。",16f)
-            text("通信はアプリ更新、翻訳モデル取得、Google ML Kitの利用状況・診断通信に使います。翻訳文は端末内で処理します。辞書は自分で追加した単語だけを保存します。")
+            text("通信はアプリ更新、翻訳モデル取得、Google ML Kitの利用状況・診断通信に使います。翻訳文は端末内で処理します。入力履歴は保存せず、ユーザー辞書には自分で追加した単語だけを保存します。")
             text("アンインストールすると設定と辞書が消えます。更新はアンインストールせずに行ってください。")
         }
         section("利用技術と動作確認") {
             text("Android 8.0以上 / バージョン ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
-            text("日本語変換は小規模辞書です。Mozcは未導入です。Samsung実機・Bluetooth/USBの実接続は追加確認が必要です。")
+            text("Mozcの公開辞書データを使う独自の変換処理です。Mozc本体ではなく、長文や固有名詞の変換には限界があります。Samsung実機・Bluetooth/USBの実接続は追加確認が必要です。")
             button("ライセンスを表示") {
-                AlertDialog.Builder(this).setTitle("ライセンス・利用技術").setMessage(assets.open("NOTICE.txt").bufferedReader().use { it.readText() }).setPositiveButton("閉じる",null).show()
+                val notices=listOf("NOTICE.txt","japanese/LICENSE-MOZC.txt","japanese/LICENSE-DICTIONARY.txt")
+                    .joinToString("\n\n") { name -> assets.open(name).bufferedReader().use { it.readText() } }
+                AlertDialog.Builder(this).setTitle("ライセンス・利用技術").setMessage(notices).setPositiveButton("閉じる",null).show()
             }
             button("配布サイト") { openWebsite() }
         }

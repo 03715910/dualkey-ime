@@ -141,6 +141,7 @@ class SettingsActivityTest {
         Assume.assumeTrue("Build and push the same-key future APK fixture first",fixture.isFile)
         @Suppress("DEPRECATION") val archive=app.packageManager.getPackageArchiveInfo(fixture.path,0)!!
         @Suppress("DEPRECATION") val code=if (android.os.Build.VERSION.SDK_INT>=28) archive.longVersionCode else archive.versionCode.toLong()
+        Assume.assumeTrue("A future-version fixture is required",code>BuildConfig.VERSION_CODE)
         val info=offer().copy(versionCode=code,versionName=archive.versionName!!,sizeBytes=fixture.length(),sha256=ApkSafety.sha256(fixture))
         val cached=File(app.cacheDir,"updates/ui-ready.apk").apply { parentFile!!.mkdirs(); fixture.copyTo(this,true) }
         ApkSafety(app).verify(cached,info)
