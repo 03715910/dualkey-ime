@@ -8,6 +8,9 @@
 - 0.1.2 / code 5 → 0.1.3 / code 6のADB更新で、設定とユーザー辞書の21項目がすべて保持されました（`app-ui-retention.log`）。
 - 設定画面は文字サイズ1.3倍とダークモードでもカテゴリの移動・設定保持・更新ボタンの可視性を確認しました。画像は`output/ui-0.1.3/`です。更新案内や準備済みAPKの画像には、非公開の将来版を模擬表示した検証用画面が含まれます。
 - 許可画面からの戻りで状態表示が上書きされる問題と、IMEを有効にした際の入力中判定が更新を止める問題を修正しました。更新タブの前面・フォーカスを確認し、別の画面や入力中にはインストール画面を出しません。初回の準備不足によるスキップや修正前の失敗は、修正後の記録と区別しています。
+- 最終のActivity Result対応・表示文言を含む署名Releaseで画面テスト5件を再実行し、スキップなしで成功しました（`app-ui-publish-tests.log`）。Release・テストAPKの生成とJVMテストは成功、Release Lintは0エラー・25警告、Webテストは9件成功です。
+- [0.1.3の公開APK](https://github.com/03715910/dualkey-ime/releases/tag/v0.1.3)とサイトを実際に公開し、通常URLのversion.jsonがcode 6を返すこと、HTML・JS・CSS・アイコンのHTTP 200、公開APK全体の容量とSHA-256一致を確認しました（`app-ui-public-verify.log`）。容量67,410,726バイト、SHA-256は`291dfa6f2dd9f7ad6eb22c0f7043fcc919814776cfe84d228d45cca43b61c506`です。
+- [開発CI](https://github.com/03715910/dualkey-ime/actions/runs/41196548053)と[Pages公開](https://github.com/03715910/dualkey-ime/actions/runs/41196877463)は成功しました。署名鍵はPC内に保持し、GitHubへの登録は行っていません。
 
 インストール許可の付与と利用者確認を含む実機での更新完了、Samsung固有の動作、物理Bluetooth/USB接続、長時間の自動取得は未確認です。OSの確認を自動操作して回避する試験は行いません。
 
