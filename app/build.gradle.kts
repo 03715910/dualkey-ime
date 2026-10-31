@@ -14,6 +14,8 @@ val hasSigning = listOf("storeFile", "storePassword", "keyAlias", "keyPassword",
 android {
     namespace = "io.github.user03715910.dualkey"
     compileSdk = 35
+    // Opt in to testing the actual signed release without changing the usual debug workflow.
+    testBuildType = providers.gradleProperty("instrumentationBuildType").orNull ?: "debug"
     defaultConfig {
         applicationId = "io.github.user03715910.dualkey"
         minSdk = 26

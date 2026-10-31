@@ -64,3 +64,19 @@ python tools/package_release.py
 アプリの「今すぐ更新を確認」→「更新APKをダウンロード」→「検証済みAPKをインストール」と進みます。自動ダウンロードを有効にした場合は最初の2段階がバックグラウンドで行われます。通知の許可がない端末ではアプリを開いて確認できます。
 
 必要ならAndroidの「この提供元を許可」を有効にし、戻って標準インストーラーで確認します。ユーザー確認やSamsungの制限を回避しません。更新は現在のアプリへ重ねて行い、アンインストールしません。入力中の文章を失わないよう、先に入力を確定してから更新してください。
+
+## 公開フィードと更新保持の追加試験
+
+`PublishedUpdateDeviceTest`は専用エミュレーターと署名Releaseを使う明示実行専用です。通常の入力テストではスキップします。`-PinstrumentationBuildType=release`で`:app:assembleReleaseAndroidTest`を実行すると、通常のデバッグ版を変更せずに配布版を対象とするテストAPKを作れます。
+
+旧版へテストAPKを導入し、`-e publicUpdate true -e publishedVersionCode 新版コード`とメソッド名を指定して、順番に実行します。
+
+1. `seedEverySettingAndDictionary`：設定・ユーザー辞書の21項目を保存し、期待値をアプリ内に記録。
+2. `downloadAndVerifyPublishedUpdate`：実際のHTTPS更新フィードから新版を検出し、公開APK全体を取得して署名などを検証。公開前は実行できません。
+3. Android標準の確認画面、または専用エミュレーターへのADB上書きで新版を導入。ADBを使った場合は、標準画面での更新完了確認とは分けて記録。
+4. `retainsEverySettingAndDictionaryAfterUpdate`：21項目すべてとユーザー辞書が一致することを確認。
+5. 新版を対象にテストAPKを再ビルドして`recognizesInstalledVersionAsCurrent`：公開フィードの版をインストール済みとして扱うことを確認。
+
+公開待ちの場合は、1・3・4だけをローカル署名APKで検証できます。試験用APKやテストAPKは公開しません。実機の利用設定を試験で書き換えないでください。
+
+1・3・4をまとめて実行する場合は、旧版を導入した専用`DualKeyTest` AVDを起動して`python tools/test_release_update.py --after 新版の署名APK`を使います。別AVD・実機・ダウングレードは拒否します。`--public-feed`を追加した場合だけ2も実行します。テストAPKの署名は配布APKと同じ鍵である必要があります。
