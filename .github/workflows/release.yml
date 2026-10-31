@@ -1,0 +1,132 @@
+name: Publish signed APK and download site
+on:
+  workflow_dispatch:
+    inputs:
+      confirmation:
+        description: 'Type PUBLISH to publish the committed version.properties and release-notes.txt'
+        required: true
+        type: string
+concurrency:
+  group: dualkey-production-release
+  cancel-in-progress: false
+permissions:
+  contents: read
+jobs:
+  build:
+    if: inputs.confirmation == 'PUBLISH' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    environment: production
+    permissions:
+      contents: write
+    outputs:
+      tag: ${{ steps.version.outputs.tag }}
+    env:
+      GH_TOKEN: ${{ github.token }}
+      DUALKEY_STOREFILE: .local/release.p12
+      DUALKEY_STOREPASSWORD: ${{ secrets.RELEASE_STORE_PASSWORD }}
+      DUALKEY_KEYALIAS: ${{ secrets.RELEASE_KEY_ALIAS }}
+      DUALKEY_KEYPASSWORD: ${{ secrets.RELEASE_KEY_PASSWORD }}
+      DUALKEY_CERTSHA256: ${{ secrets.RELEASE_CERT_SHA256 }}
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '21'
+      - uses: android-actions/setup-android@v3
+      - run: sdkmanager 'platforms;android-35' 'build-tools;35.0.0'
+      - uses: gradle/actions/setup-gradle@v4
+      - name: Restore private signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.RELEASE_KEYSTORE_BASE64 }}
+        run: |
+          python - <<'PY'
+          import base64, os, pathlib
+          for name in ['KEYSTORE_BASE64', 'DUALKEY_STOREPASSWORD', 'DUALKEY_KEYALIAS', 'DUALKEY_KEYPASSWORD', 'DUALKEY_CERTSHA256']:
+              if not os.environ.get(name):
+                  raise SystemExit('Missing release secret: ' + name)
+          pathlib.Path('.local').mkdir(mode=0o700, exist_ok=True)
+          key = pathlib.Path('.local/release.p12')
+          key.write_bytes(base64.b64decode(os.environ['KEYSTORE_BASE64'], validate=True))
+          key.chmod(0o600)
+          PY
+      - run: chmod +x gradlew
+      - name: Build and validate
+        run: |
+          ./gradlew :core:test :app:assembleRelease :app:lintRelease --console=plain
+          node --check site/app.js
+          node --test tools/site.test.cjs
+      - name: Fetch existing history and stage matching metadata
+        run: |
+          python tools/fetch_history.py
+          python tools/package_release.py --history previous-history.json
+      - id: version
+        name: Read validated version
+        run: |
+          python - <<'PY'
+          import json, os
+          v = json.load(open('dist/site/version.json'))
+          with open(os.environ['GITHUB_OUTPUT'], 'a') as output:
+              output.write('tag=v' + v['versionName'] + '\n')
+          PY
+      - name: Create a draft and upload complete release
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          if gh release view "$TAG" --repo "$GITHUB_REPOSITORY" > /dev/null 2>&1; then
+            echo 'This version already exists; increase versionCode/versionName instead of overwriting.'
+            exit 1
+          fi
+          if gh api "repos/$GITHUB_REPOSITORY/git/ref/tags/$TAG" > /dev/null 2>&1; then
+            echo 'This tag already exists. Inspect it; the workflow will not move existing tags.'
+            exit 1
+          fi
+          gh release create "$TAG" --repo "$GITHUB_REPOSITORY" --target "$GITHUB_SHA" --draft --title "DualKey IME $TAG (開発版)" --notes-file release-notes.txt dist/release/*
+          mkdir downloaded-release
+          gh release download "$TAG" --repo "$GITHUB_REPOSITORY" --dir downloaded-release
+          python - <<'PY'
+          import hashlib, json, pathlib
+          v = json.load(open('dist/site/version.json'))
+          downloaded = pathlib.Path('downloaded-release') / ('DualKeyIME-' + v['versionName'] + '.apk')
+          assert downloaded.stat().st_size == v['sizeBytes']
+          assert hashlib.file_digest(downloaded.open('rb'), 'sha256').hexdigest() == v['sha256']
+          assert json.load(open('downloaded-release/version.json')) == v
+          PY
+      - name: Publish verified release assets
+        env:
+          TAG: ${{ steps.version.outputs.tag }}
+        run: gh release edit "$TAG" --repo "$GITHUB_REPOSITORY" --draft=false --latest
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: dist/site
+      - uses: actions/upload-artifact@v4
+        with:
+          name: release-metadata
+          path: dist/site/version.json
+      - name: Remove runner signing material
+        if: always()
+        run: rm -f .local/release.p12
+  deploy:
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    permissions:
+      pages: write
+      id-token: write
+      contents: read
+    steps:
+      - uses: actions/configure-pages@v5
+      - uses: actions/deploy-pages@v4
+        id: deployment
+  verify:
+    needs: deploy
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/download-artifact@v4
+        with:
+          name: release-metadata
+          path: dist/site
+      - run: python tools/verify_public_release.py

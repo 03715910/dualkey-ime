@@ -1,0 +1,6 @@
+<input-method xmlns:android="http://schemas.android.com/apk/res/android"
+    android:settingsActivity="io.github.user03715910.dualkey.settings.MainActivity"
+    android:supportsSwitchingToNextInputMethod="true">
+    <subtype android:imeSubtypeLocale="ja_JP" android:imeSubtypeMode="keyboard" android:label="@string/subtype_ja" />
+    <subtype android:imeSubtypeLocale="en_US" android:imeSubtypeMode="keyboard" android:label="@string/subtype_en" android:isAsciiCapable="true" />
+</input-method>

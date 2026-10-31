@@ -1,0 +1,26 @@
+DualKey IME
+Copyright 2026 DualKey IME contributors
+Project source license: Apache License 2.0 (see repository LICENSE).
+
+Kotlin standard library / kotlinx.coroutines: Apache License 2.0
+AndroidX Core, AppCompat, Lifecycle, DataStore, WorkManager: Apache License 2.0
+Android APK Signature Scheme verification library (apksig): Apache License 2.0
+https://source.android.com/docs/setup/about/licenses
+https://www.apache.org/licenses/LICENSE-2.0
+
+Google ML Kit Translate 17.0.3 and Google Play services dependencies are distributed under Google's applicable SDK terms; they are not represented as Apache-licensed code.
+https://developers.google.com/ml-kit/terms
+https://developers.google.com/ml-kit/terms/data-processing-terms
+https://developers.google.com/ml-kit/language/translation/translation-terms
+https://developers.google.com/ml-kit/android-data-disclosure
+Translation model acquisition and diagnostics can communicate with Google. Translation text is processed on device.
+Translations may contain inaccuracies. Google Translate attribution applies to translation results.
+
+Mozc is NOT included. The bundled small Japanese and English dictionaries were written for this project. No third-party keyboard artwork or dictionaries were copied.
+This service may contain translations powered by Google. Google disclaims all warranties related to the translations, express or implied, including any warranties of accuracy, reliability, and any implied warranties of merchantability, fitness for a particular purpose and noninfringement.
+
+The unmodified Google Translate attribution badge is obtained from:
+https://docs.cloud.google.com/static/translate/images/google-translate-attribution.zip
+It is used only beside translation results under the attribution guidelines:
+https://cloud.google.com/translate/attribution
+This badge remains subject to Google's brand rights, rather than the project's source-code license.

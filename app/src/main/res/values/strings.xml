@@ -1,0 +1,5 @@
+<resources>
+    <string name="app_name">DualKey IME</string>
+    <string name="subtype_ja">日本語</string>
+    <string name="subtype_en">English</string>
+</resources>

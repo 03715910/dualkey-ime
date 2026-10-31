@@ -1,0 +1,7 @@
+This service may contain translations powered by Google. Google disclaims all warranties related to the translations, express or implied, including any warranties of accuracy, reliability, and any implied warranties of merchantability, fitness for a particular purpose and noninfringement.
+
+The unmodified Google Translate attribution badge is obtained from:
+https://docs.cloud.google.com/static/translate/images/google-translate-attribution.zip
+It is used only beside translation results under the attribution guidelines:
+https://cloud.google.com/translate/attribution
+This badge remains subject to Google's brand rights, rather than the project's source-code license.

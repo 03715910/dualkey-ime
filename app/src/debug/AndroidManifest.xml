@@ -1,0 +1,4 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <!-- Debug instrumentation verifies a release installed alongside the debug variant. -->
+    <queries><package android:name="io.github.user03715910.dualkey" /></queries>
+</manifest>
