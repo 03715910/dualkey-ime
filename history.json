@@ -1,0 +1,23 @@
+[
+  {
+    "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 4,
+    "versionName": "0.1.1",
+    "releaseDate": "2026-10-31",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.1/DualKeyIME-0.1.1.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "d869a49f079527e382d8982f5bab8854665926781bfaa19a3b911d22e9df4540",
+    "sizeBytes": 67392682,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "初回公開版：専用ダウンロードサイトとアプリ内更新の公式配布先を設定",
+      "日本語12キーフリック、数字行、英語QWERTYとShift/Caps Lock",
+      "物理キーボードのローマ字入力、通常・省スペース・完全非表示の切り替え",
+      "小規模辞書の簡易変換・予測とユーザー辞書",
+      "Google ML Kitの日英翻訳プレビューとモデル管理",
+      "公式配布元・ハッシュ・暗号署名を検証する更新処理",
+      "Samsung実機・Bluetooth/USB接続の確認は未実施です"
+    ]
+  }
+]
