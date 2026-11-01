@@ -1,6 +1,26 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 11,
+    "versionName": "0.1.8",
+    "releaseDate": "2026-11-01",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.8/DualKeyIME-0.1.8.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "b20e4f682831607c1f4aa23c5da5c4717c50136cd434ccb99349b877159e34d5",
+    "sizeBytes": 101233344,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "確定して下線が消えた後も、次に続く言葉を候補欄へ表示",
+      "「続きを」から「お願いします」「教えてください」などを提案し、タップで末尾へ追加",
+      "学習ONでは、よく使う確定語句どうしの組合せを端末内で学習して順位へ反映",
+      "カーソル移動・選択・削除・改行・入力先変更で古い候補を取り消し、追加直前にも位置を確認",
+      "既存の変換学習を残したままデータベースを移行し、学習OFF・削除・学習禁止欄に対応",
+      "フリック・物理キーボード・英語とカタカナへの切り替え・アプリ内更新を維持"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 10,
     "versionName": "0.1.7",
     "releaseDate": "2026-11-01",
