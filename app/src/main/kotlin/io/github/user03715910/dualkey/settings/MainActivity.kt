@@ -300,11 +300,11 @@ class MainActivity : AppCompatActivity() {
         }
         section("変換の学習") {
             toggle("よく使う日本語の変換を学習",Prefs.learningEnabled,s.learningEnabled)
-            text("確定した語句の読み・表記・使用回数と最終使用時刻を端末内に保存し、よく使うものを変換・予測の上位に表示します。パスワードや学習禁止の入力欄では保存・利用しません。")
+            text("確定した語句の読み・表記・使用回数と最終使用時刻、直前の確定語句と次の語句の組合せを端末内に保存します。よく使う変換や続きの言葉を上位へ表示します。パスワードや学習禁止の入力欄では保存・利用しません。")
             text(app.learning.message.value).tag="learning_status"
             button("学習データを削除") {
                 AlertDialog.Builder(this).setTitle("学習データを削除しますか？")
-                    .setMessage("学習した候補と使用回数を削除します。手動で登録したユーザー辞書は残ります。")
+                    .setMessage("学習した候補・続きの組合せ・使用回数を削除します。手動で登録したユーザー辞書は残ります。")
                     .setPositiveButton("削除") { _,_ -> app.learning.clear() }.setNegativeButton("戻る",null).show()
             }
         }
@@ -370,7 +370,7 @@ class MainActivity : AppCompatActivity() {
         heading("アプリについて","DualKey IME ${BuildConfig.VERSION_NAME}")
         section("入力とプライバシー") {
             text("入力文章を独自サーバーへ送信しません。キー操作の履歴は記録しません。パスワード欄では予測・学習・翻訳・未確定プレビューを無効にします。",16f)
-            text("通信はアプリ更新、翻訳モデル取得、Google ML Kitの利用状況・診断通信に使います。変換と翻訳文は端末内で処理します。学習ON時は確定した語句の読み・表記・使用回数・最終使用時刻を端末内に保存します。「変換と辞書」で停止・削除できます。")
+            text("通信はアプリ更新、翻訳モデル取得、Google ML Kitの利用状況・診断通信に使います。変換と翻訳文は端末内で処理します。学習ON時は確定した語句の読み・表記・使用回数・最終使用時刻と、前後の確定語句の組合せを端末内に保存します。「変換と辞書」で停止・削除できます。")
             text("アンインストールすると設定と辞書が消えます。更新はアンインストールせずに行ってください。")
         }
         section("利用技術と動作確認") {

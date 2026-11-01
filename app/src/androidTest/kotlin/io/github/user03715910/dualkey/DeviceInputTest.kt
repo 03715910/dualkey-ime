@@ -115,6 +115,72 @@ class DeviceInputTest {
         assertTrue(node!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
         instrumentation.waitForIdleSync()
     }
+    private fun commitTsudukiwo() {
+        letters("TSUDUKIWO"); key(KeyEvent.KEYCODE_SPACE)
+        await("続きを converted") { inputText().endsWith("続きを") }
+        key(KeyEvent.KEYCODE_ENTER)
+    }
+    @Test fun nextWordsRemainAfterUnderlineDisappearsAndAppendOnTap() {
+        commitTsudukiwo()
+        main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
+        await("post-commit next word") { findNode { it.text?.toString()=="お願いします" }!=null }
+        assertEquals("続きを",inputText())
+        clickLabel("お願いします"); assertEquals("続きをお願いします",inputText())
+        main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
+        clickLabel("。"); assertEquals("続きをお願いします。",inputText())
+    }
+    @Test fun hardwareDownAndEnterCanAcceptTheNextWord() {
+        commitTsudukiwo(); key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("続きをお願いします",inputText())
+        main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
+    }
+    @Test fun hiddenKeyboardDoesNotUseArrowsForInvisibleNextWords() {
+        commitTsudukiwo()
+        key(KeyEvent.KEYCODE_K,KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON)
+        await("keyboard hidden") { imeHeight()==0 }
+        key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("続きを\n",inputText())
+    }
+    @Test fun movingOrSelectingTextDiscardsOldNextWords() {
+        commitTsudukiwo()
+        await("next word shown") { findNode { it.text?.toString()=="お願いします" }!=null }
+        main { editor.setSelection(0,editor.length()) }
+        await("stale next word cleared") { findNode { it.text?.toString()=="お願いします" }==null }
+        assertEquals("続きを",inputText())
+    }
+    @Test fun ordinaryTypingContinuesInsteadOfAutomaticallyAcceptingSuggestions() {
+        commitTsudukiwo(); letters("NIHONGO")
+        assertEquals("続きをにほんご",inputText())
+        key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("続きを日本語",inputText())
+    }
+    @Test fun predictionSettingCanDisablePostCommitSuggestions() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.japanesePrediction,false); app.settings.state.first { !it.japanesePrediction } }
+        commitTsudukiwo()
+        assertNull(findNode { it.text?.toString()=="お願いします" })
+    }
+    @Test fun nextWordLearningRanksAChosenContinuationButPrivateFieldsUseDefaults() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking {
+            app.learning.awaitLoaded(); val before=app.learning.state.value.revision; app.learning.clear()
+            withTimeout(10_000) { app.learning.state.first { it.revision>before && it.entries.isEmpty() && it.continuations.isEmpty() } }
+            app.settings.set(Prefs.learningEnabled,true); app.settings.state.first { it.learningEnabled }
+        }
+        commitTsudukiwo(); clickLabel("見せてください")
+        runBlocking { withTimeout(10_000) { app.learning.state.first { it.continuations.any { c -> c.context=="続きを" && c.text=="見せてください" } } } }
+        main { editor.setText("") }; instrumentation.waitForIdleSync()
+        commitTsudukiwo(); key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("続きを見せてください",inputText())
+        main {
+            editor.setText(""); editor.imeOptions=editor.imeOptions or android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+            activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
+        }
+        SystemClock.sleep(200)
+        commitTsudukiwo(); key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("続きをお願いします",inputText())
+        assertFalse(app.learning.state.value.continuations.any { it.context=="続きを" && it.text=="お願いします" })
+    }
     @Test fun physicalRomajiAndSpaceEnterConversion() {
         letters("KYOUHA"); await("きょうは") { inputText()=="きょうは" }
         key(KeyEvent.KEYCODE_SPACE); await("今日は") { inputText()=="今日は" }
