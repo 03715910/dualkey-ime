@@ -1,6 +1,26 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 10,
+    "versionName": "0.1.7",
+    "releaseDate": "2026-11-01",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.7/DualKeyIME-0.1.7.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "07d526b89434267443e0acb83e790d21529cb6cf5bd530eab9841c398e3089b9",
+    "sizeBytes": 101216960,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "通常の日本語候補に、意味に対応する英語と関連するカタカナ語を追加",
+      "JMdictの端末内辞書により「いす」から「イス・チェア・chair」などを検索",
+      "左上の地球儀を「カナ/英」へ変更し、未確定文字列全体をカタカナ→英語→ひらがなの順に切り替え",
+      "辞書にない文章の英語切り替えは、取得済みのGoogle翻訳モデルで端末内処理",
+      "重複するキーボード選択・非表示ボタンを削除し、外付けキーボード用の表示設定とショートカットを維持",
+      "確定済みの文章にはさかのぼらず、通常入力・変換学習・アプリ内更新を維持"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 9,
     "versionName": "0.1.6",
     "releaseDate": "2026-10-31",
