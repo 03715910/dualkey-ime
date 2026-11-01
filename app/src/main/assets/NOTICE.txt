@@ -35,3 +35,9 @@ https://docs.cloud.google.com/static/translate/images/google-translate-attributi
 It is used only beside translation results under the attribution guidelines:
 https://cloud.google.com/translate/attribution
 This badge remains subject to Google's brand rights, rather than the project's source-code license.
+
+English equivalents and related katakana words use a transformed JMdict subset.
+Copyright James William BREEN and the Electronic Dictionary Research and Development Group.
+The original and derived dictionary data are CC BY-SA 4.0. See semantic/LICENSE-JMDICT.txt,
+semantic/EDRDG-LICENCE.html and semantic/JMdict-documentation.html for attribution and modifications.
+https://www.edrdg.org/edrdg/licence.html

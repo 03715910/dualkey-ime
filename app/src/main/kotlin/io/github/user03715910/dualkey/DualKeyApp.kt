@@ -4,6 +4,7 @@ import android.app.Application
 import io.github.user03715910.dualkey.data.SettingsStore
 import io.github.user03715910.dualkey.data.LearningStore
 import io.github.user03715910.dualkey.conversion.JapaneseDictionary
+import io.github.user03715910.dualkey.conversion.SemanticDictionary
 import io.github.user03715910.dualkey.update.UpdateScheduler
 import io.github.user03715910.dualkey.update.UpdateRepository
 import kotlinx.coroutines.*
@@ -15,12 +16,14 @@ class DualKeyApp : Application() {
     lateinit var settings: SettingsStore; private set
     val updates by lazy { UpdateRepository(this) }
     lateinit var japaneseDictionary: JapaneseDictionary; private set
+    lateinit var semanticDictionary: SemanticDictionary; private set
     lateinit var learning: LearningStore; private set
     override fun onCreate() {
         super.onCreate()
         settings = SettingsStore(this, scope)
         learning = LearningStore(this,scope) { settings.isLoaded && settings.state.value.learningEnabled }
         japaneseDictionary = JapaneseDictionary(this, scope) { settings.state.value.dictionary }
+        semanticDictionary = SemanticDictionary(this,scope)
         scope.launch { settings.awaitLoaded(); settings.state.map { it.autoCheck }.distinctUntilChanged().collect { UpdateScheduler.schedule(this@DualKeyApp, it) } }
     }
 }

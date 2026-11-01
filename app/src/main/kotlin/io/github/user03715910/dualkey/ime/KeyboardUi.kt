@@ -23,6 +23,8 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     private val toolbar = root.findViewById<LinearLayout>(R.id.toolbar)
     private val candidateStrip = root.findViewById<LinearLayout>(R.id.candidate_strip)
     private val candidateExpand = root.findViewById<TextView>(R.id.candidate_expand)
+    private val compositionAttribution = root.findViewById<ImageView>(R.id.composition_attribution)
+    private var googleText: String? = null
     private val expandedScroll = root.findViewById<ScrollView>(R.id.candidate_expanded_scroll)
     private val expandedCandidates = root.findViewById<LinearLayout>(R.id.candidate_expanded)
     private var candidateExpanded = false
@@ -48,6 +50,20 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         expandedScroll.visibility=if (candidateExpanded && !translating) View.VISIBLE else View.GONE
         candidateExpand.text=if (candidateExpanded) "閉じる" else "一覧"
         candidateExpand.contentDescription=if (candidateExpanded) "変換候補の一覧を閉じる" else "変換候補を一覧表示"
+        if (googleText!=null) {
+            candidateExpand.visibility=View.GONE
+            candidateStrip.removeAllViews()
+            candidateStrip.addView(TextView(context).apply {
+                text=googleText; textSize=17f; setTextColor(ink); gravity=Gravity.CENTER_VERTICAL; setSingleLine(true)
+                includeFontPadding=false; setPadding(dp(8),0,dp(8),0)
+                layoutParams=LinearLayout.LayoutParams(-2,-1)
+            })
+        }
+    }
+    fun googleComposition(text: String?) {
+        googleText=text
+        compositionAttribution.visibility=if (text!=null) View.VISIBLE else View.GONE
+        if (text!=null) candidateExpanded=false
     }
     private fun dp(v: Int) = (v * context.resources.displayMetrics.density).toInt()
     init {
@@ -117,10 +133,8 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             description=if (english) "日本語に切り替え" else "英語に切り替え"))
         toolbar.addView(button(if (mode == DisplayMode.COMPACT) "全表示" else "縮小", if (mode == DisplayMode.COMPACT) "full" else "compact", true,
             description=if (mode == DisplayMode.COMPACT) "画面キーボードを全表示" else "省スペース表示"))
-        toolbar.addView(button("⌄", "hide", true, description="キーボードを隠す"))
         if (!sensitive) toolbar.addView(button("翻訳", "translate", true))
         toolbar.addView(button("⚙", "settings", true, description="設定"))
-        toolbar.addView(button("🌐", "picker", true, description="キーボードを選択"))
         numberRow.removeAllViews(); keys.removeAllViews()
         showNumbers=mode==DisplayMode.FULL && settings.numberRow
         showKeys=mode==DisplayMode.FULL
@@ -143,11 +157,13 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
                 listOf(listOf("あ","い","う","え","お"),listOf("か","き","く","け","こ"),listOf("さ","し","す","せ","そ")),
                 listOf(listOf("た","ち","つ","て","と"),listOf("な","に","ぬ","ね","の"),listOf("は","ひ","ふ","へ","ほ")),
                 listOf(listOf("ま","み","む","め","も"),listOf("や","ゃ","ゆ","ゅ","よ"),listOf("ら","り","る","れ","ろ")))
-            val left=listOf(Triple("🌐","picker","キーボードを選択"),Triple("◀","cursor_left","カーソルを左へ"),Triple("記号","symbols","記号入力"))
+            val left=listOf(Triple("カナ/英","cycle_script","表記を切り替え：カタカナ・英語・ひらがな"),Triple("◀","cursor_left","カーソルを左へ"),Triple("記号","symbols","記号入力"))
             val right=listOf(Triple("⌫","delete","削除"),Triple("▶","cursor_right","カーソルを右へ"),Triple("空白","space","空白・変換"))
             groups.forEachIndexed { index,group -> keys.addView(LinearLayout(context).apply {
                 orientation=LinearLayout.HORIZONTAL; isBaselineAligned=false
-                addView(button(left[index].first,left[index].second,function=true,description=left[index].third))
+                addView(button(left[index].first,left[index].second,function=true,description=left[index].third).apply {
+                    if (index==0) isEnabled=!sensitive
+                })
                 group.forEach { values -> addView(FlickKey(context,values,dp(settings.flickDp).toFloat(),feedback,callback,!sensitive).also(::decorate)) }
                 addView(button(right[index].first,right[index].second,function=true,description=right[index].third))
             }) }

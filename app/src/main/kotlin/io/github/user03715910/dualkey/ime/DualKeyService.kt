@@ -17,6 +17,7 @@ import io.github.user03715910.dualkey.data.*
 import io.github.user03715910.dualkey.settings.MainActivity
 import io.github.user03715910.dualkey.translation.TranslationEngine
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.first
 
 class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -26,7 +27,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private val visibility = VisibilityController()
     private val conversion get() = app.japaneseDictionary.engine.value
     private data class CandidateQuery(val reading: String, val prediction: Boolean, val limit: Int,
-        val dictionary: Map<String, List<String>>, val engine: ConversionEngine, val learning: LearningSnapshot)
+        val dictionary: Map<String, List<String>>, val engine: ConversionEngine, val learning: LearningSnapshot,
+        val semantic: JapaneseLexicon?)
     private var candidateQuery: CandidateQuery? = null
     private var candidateJob: Job? = null
     private var candidateLoading=false
@@ -50,6 +52,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var session = 0L
     private var revision = 0L
     private var translationJob: Job? = null
+    private var variant: CompositionVariant? = null
+    private var variantJob: Job? = null
     private val consumed = mutableSetOf<Int>()
     private lateinit var inputManager: InputManager
     private var inputStarted = false
@@ -60,6 +64,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         inputManager = getSystemService(InputManager::class.java)
         inputManager.registerInputDeviceListener(this, Handler(Looper.getMainLooper()))
         scope.launch { app.japaneseDictionary.engine.collect { refreshCandidates() } }
+        scope.launch { app.semanticDictionary.lexicon.collect { refreshCandidates() } }
         scope.launch { app.japaneseDictionary.message.collect { ui?.dictionaryStatus(it) } }
         scope.launch { app.learning.state.collect { refreshCandidates() } }
         scope.launch { app.settings.state.collect {
@@ -156,10 +161,14 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         if (settings.vibration) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
         if (settings.sound) getSystemService(AudioManager::class.java).playSoundEffect(AudioManager.FX_KEY_CLICK,0.3f)
     }
-    private fun invalidateTranslation() { revision++; translationJob?.cancel(); translationJob=null; ui?.hideTranslation() }
+    private fun invalidateTranslation() {
+        revision++; translationJob?.cancel(); translationJob=null; variantJob?.cancel(); variantJob=null; ui?.hideTranslation()
+    }
+    private fun resetVariant() { variantJob?.cancel(); variantJob=null; variant=null }
     private fun clearState() {
         candidateJob?.cancel(); candidateQuery=null; candidateLoading=false; requestedReading=""; requestedLimit=0
-        invalidateTranslation(); composer.clear(); englishWord=""; candidates=emptyList(); candidateRecords=emptyList(); selected=-1; converting=false
+        invalidateTranslation(); resetVariant(); composer.clear(); englishWord=""; candidates=emptyList(); candidateRecords=emptyList(); selected=-1; converting=false
+        ui?.googleComposition(null)
         ui?.candidates(emptyList(),-1,{})
     }
     private fun resetConversion() { selected=-1; converting=false }
@@ -168,7 +177,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             if (requestedReading!=composer.reading) { requestedReading=composer.reading; requestedLimit=settings.candidateCount }
             val query=CandidateQuery(composer.reading,!converting && settings.japanesePrediction,
                 maxOf(settings.candidateCount,requestedLimit),settings.dictionary,conversion,
-                if (app.settings.isLoaded && settings.learningEnabled && learningAllowed) app.learning.state.value else LearningSnapshot())
+                if (app.settings.isLoaded && settings.learningEnabled && learningAllowed) app.learning.state.value else LearningSnapshot(),
+                app.semanticDictionary.lexicon.value)
             if (candidateQuery!=query) {
                 val retain=candidateQuery?.let { it.reading==query.reading && it.prediction==query.prediction }==true
                 candidateJob?.cancel(); candidateQuery=query; candidateLoading=false
@@ -195,7 +205,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         showCandidates()
     }
     private fun personalized(query: CandidateQuery): List<Candidate> = Personalization.candidates(query.reading,
-        query.engine.candidates(query.reading,query.prediction,query.limit),query.learning.entries,query.prediction,query.limit)
+        SemanticConversion.augment(query.reading,query.engine.candidates(query.reading,query.prediction,query.limit),query.semantic,query.limit),
+        query.learning.entries,query.prediction,query.limit)
     private fun setCandidateRecords(values: List<Candidate>) {
         val chosen=if (converting) candidateRecords.getOrNull(selected)?.text else null
         candidateRecords=values; candidates=values.map { it.text }
@@ -204,6 +215,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private fun showCandidates() {
         if (selected >= candidates.size) selected=-1
         val canExpand=candidateQuery?.let { it.limit<1000 && candidates.size>=it.limit }==true
+        ui?.googleComposition(variant?.takeIf { it.googlePowered }?.text)
         ui?.candidates(candidates,selected,::commitCandidate,canExpand,candidateLoading)
     }
     private fun moreCandidates() {
@@ -212,19 +224,21 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         refreshCandidates()
     }
     private fun syncComposition() {
-        currentInputConnection?.setComposingText(if (converting && selected in candidates.indices) candidates[selected] else composer.text,1)
+        currentInputConnection?.setComposingText(variant?.text ?: if (converting && selected in candidates.indices) candidates[selected] else composer.text,1)
         refreshCandidates()
     }
     private fun commitComposition(learn: Boolean=false) {
         if (!composer.isEmpty) {
-            val candidate=if (converting && selected in candidateRecords.indices) candidateRecords[selected] else Candidate(composer.reading,composer.reading)
-            if (currentInputConnection?.commitText(candidate.text,1)==true && learn) learnConfirmed(candidate)
+            val candidate=variant?.let { Candidate(it.text,it.reading) } ?:
+                if (converting && selected in candidateRecords.indices) candidateRecords[selected] else Candidate(composer.reading,composer.reading)
+            if (currentInputConnection?.commitText(candidate.text,1)==true && learn && variant?.googlePowered!=true) learnConfirmed(candidate)
         }
-        composer.clear(); resetConversion(); refreshCandidates()
+        resetVariant(); composer.clear(); resetConversion(); refreshCandidates()
     }
     private fun commitCandidate(index: Int) {
         if (index !in candidates.indices) return
         invalidateTranslation()
+        resetVariant()
         if (english) {
             // English prediction owns a composing span, so no unrelated committed text is removed.
             currentInputConnection?.commitText(candidates[index],1); englishWord=""
@@ -248,7 +262,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 currentInputConnection?.setComposingText(englishWord,1)
             } else { finishEnglish(); currentInputConnection?.commitText(value,1) }
         } else {
-            if (converting) commitComposition(true)
+            if (converting || variant!=null) commitComposition(true)
             composer.append(value); resetConversion(); currentInputConnection?.setComposingText(composer.text,1)
         }
         refreshCandidates()
@@ -259,6 +273,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun space() {
         invalidateTranslation()
+        resetVariant()
         if (english || sensitive || numeric || composer.isEmpty) { finishEnglish(); currentInputConnection?.commitText(" ",1); refreshCandidates(); return }
         if (!converting) { converting=true; refreshCandidates(); selected=0 }
         else if (candidates.isNotEmpty()) selected=(selected+1)%candidates.size
@@ -274,6 +289,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun delete() {
         invalidateTranslation()
+        if (variant!=null) { resetVariant(); resetConversion(); syncComposition(); return }
         if (converting) { resetConversion(); syncComposition(); return }
         if (!composer.isEmpty) { composer.delete(); currentInputConnection?.setComposingText(composer.text,1); if (composer.isEmpty) currentInputConnection?.finishComposingText() }
         else if (englishWord.isNotEmpty()) { englishWord=englishWord.dropLast(1); currentInputConnection?.setComposingText(englishWord,1); if (englishWord.isEmpty()) currentInputConnection?.finishComposingText() }
@@ -289,7 +305,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val cycles=listOf("かが","きぎ","くぐ","けげ","こご","さざ","しじ","すず","せぜ","そぞ","ただ","ちぢ","つっづ","てで","とど",
             "はばぱ","ひびぴ","ふぶぷ","へべぺ","ほぼぽ","あぁ","いぃ","うぅゔ","えぇ","おぉ","やゃ","ゆゅ","よょ","わゎ")
         val cycle=cycles.firstOrNull { last in it } ?: return
-        invalidateTranslation(); composer.replace(s.dropLast(1)+cycle[(cycle.indexOf(last)+1)%cycle.length]); resetConversion(); syncComposition()
+        invalidateTranslation(); resetVariant(); composer.replace(s.dropLast(1)+cycle[(cycle.indexOf(last)+1)%cycle.length]); resetConversion(); syncComposition()
     }
     private fun moveCursor(step: Int) {
         invalidateTranslation()
@@ -303,13 +319,13 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private fun onScreenKey(key: String) {
         when (key) {
             "more_candidates" -> moreCandidates()
+            "cycle_script" -> cycleScript()
             "mode" -> switchMode()
             "full" -> chooseDisplay(DisplayMode.FULL)
             "compact" -> chooseDisplay(DisplayMode.COMPACT)
             "hide" -> chooseDisplay(DisplayMode.HIDDEN)
             "settings" -> startActivity(Intent(this, MainActivity::class.java).putExtra("settings",true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
-            "picker" -> getSystemService(InputMethodManager::class.java).showInputMethodPicker()
             "translate" -> translationMenu()
             "symbols" -> { symbols=!symbols; rebuild() }
             "space" -> space()
@@ -338,14 +354,15 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             keyCode==KeyEvent.KEYCODE_EISU -> switchMode(true)
             keyCode==KeyEvent.KEYCODE_KANA || keyCode==KeyEvent.KEYCODE_KATAKANA_HIRAGANA -> switchMode(false)
             keyCode==KeyEvent.KEYCODE_HENKAN && !english -> space()
-            keyCode==KeyEvent.KEYCODE_MUHENKAN && !english && !composer.isEmpty -> { resetConversion(); syncComposition() }
+            keyCode==KeyEvent.KEYCODE_MUHENKAN && !english && !composer.isEmpty -> { invalidateTranslation(); resetVariant(); resetConversion(); syncComposition() }
             event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> { commitComposition(); finishEnglish(); handled=false }
             keyCode==KeyEvent.KEYCODE_SPACE -> space()
             keyCode==KeyEvent.KEYCODE_ENTER || keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER -> enter()
             keyCode==KeyEvent.KEYCODE_DEL -> delete()
             keyCode==KeyEvent.KEYCODE_ESCAPE && (!composer.isEmpty || englishWord.isNotEmpty()) -> {
                 invalidateTranslation()
-                if (converting) { resetConversion(); syncComposition() } else { composer.clear(); englishWord=""; currentInputConnection?.setComposingText("",1); currentInputConnection?.finishComposingText(); refreshCandidates() }
+                if (variant!=null) { resetVariant(); resetConversion(); syncComposition() }
+                else if (converting) { resetConversion(); syncComposition() } else { composer.clear(); englishWord=""; currentInputConnection?.setComposingText("",1); currentInputConnection?.finishComposingText(); refreshCandidates() }
             }
             keyCode in setOf(KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_DOWN) -> {
                 if (converting && candidates.isNotEmpty()) {
@@ -389,6 +406,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }.getOrDefault(false)
     private fun translationMenu() {
         if (sensitive || numeric) return
+        invalidateTranslation()
         val directions=listOf<Pair<String,()->Unit>>("Googleで日→英" to { startTranslation(true) }, "Googleで英→日" to { startTranslation(false) })
         ui?.showTranslation("Googleで翻訳する方向を選んでください。未確定の文章、または選択中の文章が対象です。",
             (if (settings.toEnglish) directions else directions.reversed()) + ("閉じる" to { invalidateTranslation() }))
@@ -396,7 +414,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private fun startTranslation(toEnglish: Boolean, allowDownload: Boolean = false) {
         if (sensitive || numeric) return
         val ic=currentInputConnection ?: return
-        val own=if (english) englishWord else composer.reading
+        val own=if (english) englishWord else variant?.text ?: composer.reading
         val fromSelection=own.isEmpty()
         val source=if (fromSelection) ic.getSelectedText(0)?.toString().orEmpty() else own
         if (source.isBlank() || source.length>5000) { ui?.showTranslation("未確定の文章か選択範囲を用意してください（最大5,000文字）。",listOf("閉じる" to { invalidateTranslation() })); return }
@@ -416,11 +434,43 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 if (session!=sessionId || revision!=sourceRevision || sensitive) return@launch
                 ui?.showTranslation("Google翻訳（端末内）\n$result\n翻訳には誤りが含まれる場合があります。",listOf("この訳を入力" to {
                     if (session==sessionId && revision==sourceRevision && !sensitive && (!fromSelection || currentInputConnection?.getSelectedText(0)?.toString()==source)) {
-                        currentInputConnection?.commitText(result,1); composer.clear(); englishWord=""; resetConversion(); refreshCandidates(); invalidateTranslation()
+                        currentInputConnection?.commitText(result,1); resetVariant(); composer.clear(); englishWord=""; resetConversion(); refreshCandidates(); invalidateTranslation()
                     } else { invalidateTranslation(); Toast.makeText(this@DualKeyService,"入力先が変わりました。翻訳し直してください。",Toast.LENGTH_SHORT).show() }
                 }, "キャンセル" to { invalidateTranslation() }), attribution=true)
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { if (session==sessionId) ui?.showTranslation("翻訳できませんでした。モデル取得時のWi-Fi接続を確認してください。通常の入力は続けられます。",listOf("閉じる" to { invalidateTranslation() })) }
+        }
+    }
+    private fun cycleScript() {
+        if (sensitive || numeric || !predictionsAllowed || english || composer.isEmpty) return
+        invalidateTranslation()
+        val reading=composer.reading
+        if (reading.length>5000) { Toast.makeText(this,"表記切り替えは5,000文字までです。",Toast.LENGTH_SHORT).show(); return }
+        val japanese=if (converting) candidateRecords.getOrNull(selected)?.text ?: reading
+            else conversion.candidates(reading,false,2).firstOrNull()?.text ?: reading
+        val request=variant?.takeIf { it.reading==reading }?.next() ?: CompositionVariant.start(reading,japanese)
+        variant=request; resetConversion(); syncComposition()
+        if (request.script!=CompositionScript.ENGLISH) return
+        val inputSession=session; val inputRevision=revision
+        fun current() = variant===request && session==inputSession && revision==inputRevision && inputStarted && !sensitive
+        variantJob=scope.launch {
+            try {
+                val lexicon=app.semanticDictionary.lexicon.value ?: withTimeoutOrNull(3000) { app.semanticDictionary.lexicon.first { it!=null } }
+                val word=withContext(Dispatchers.Default) { SemanticConversion.english(lexicon,request.reading,request.japanese) }
+                if (!current()) return@launch
+                if (word==null && !translator.ready()) {
+                    if (current()) Toast.makeText(this@DualKeyService,"この文章の英語変換には「設定 → 翻訳」のモデル取得が必要です。もう一度押すとひらがなへ戻ります。",Toast.LENGTH_LONG).show()
+                    return@launch
+                }
+                val translated=word ?: withTimeout(15_000) { translator.translate(request.japanese,true) }
+                if (current() && translated.isNotBlank() && translated.length<=5000) {
+                    variant=request.copy(text=translated,googlePowered=word==null)
+                    syncComposition()
+                }
+            } catch (cancelled: CancellationException) { throw cancelled }
+            catch (_: Exception) {
+                if (current()) Toast.makeText(this@DualKeyService,"英語へ切り替えられませんでした。もう一度押すとひらがなへ戻ります。",Toast.LENGTH_SHORT).show()
+            }
         }
     }
 }

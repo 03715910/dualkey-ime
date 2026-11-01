@@ -1,0 +1,28 @@
+JMdict English and Japanese dictionary data
+
+This application uses the JMdict dictionary file, which is the property of
+the Electronic Dictionary Research and Development Group (EDRDG), and is used
+in conformance with the Group's licence.
+Copyright James William BREEN and the Electronic Dictionary Research and Development Group.
+
+Source: https://www.edrdg.org/pub/Nihongo/JMdict_e.gz
+Project: https://www.edrdg.org/jmdict/j_jmdict.html
+Licence statement: https://www.edrdg.org/edrdg/licence.html
+Licence: Creative Commons Attribution-ShareAlike 4.0 International (CC BY-SA 4.0)
+https://creativecommons.org/licenses/by-sa/4.0/
+
+DualKey modifications: select short English equivalents from the first two
+non-obsolete senses; remove parenthetical explanations; join first-sense
+English glosses to Japanese katakana loanwords; normalize reading lookup keys;
+compile the subset into a read-only DKL1 index. These derived dictionary data
+are distributed under CC BY-SA 4.0, without warranties. Neither EDRDG nor the
+dictionary contributors endorse this application. The application's independent
+source code is separately licensed and is not included in this data licence.
+
+The exact original source, build script and transformed data are available at:
+https://github.com/03715910/dualkey-ime/tree/main/data/semantic
+https://github.com/03715910/dualkey-ime/blob/main/tools/build_semantic_dictionary.py
+https://github.com/03715910/dualkey-ime/tree/main/app/src/main/assets/semantic
+
+The original licence statement and project documentation are bundled as
+EDRDG-LICENCE.html and JMdict-documentation.html alongside this notice.

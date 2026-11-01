@@ -1,0 +1,13 @@
+{
+  "format": 1,
+  "source": "JMdict (English components)",
+  "sourceUrl": "https://www.edrdg.org/pub/Nihongo/JMdict_e.gz",
+  "sourceSha256": "7cbacefaf3264a72476327c7bff837348b239ea605ad7818d5cf79c7f5ea9dcb",
+  "sourceEntries": 218995,
+  "keys": 416944,
+  "entries": 1006730,
+  "bytes": 31502264,
+  "sha256": "829298216e49f31d6dacf087a9631aa8a4e76203f782254a14130c88a49a0753",
+  "license": "CC-BY-SA-4.0",
+  "compressedBytes": 9591369
+}

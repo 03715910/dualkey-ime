@@ -52,6 +52,7 @@ class DeviceInputTest {
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
         runBlocking { app.settings.awaitLoaded(); app.settings.set(Prefs.learningEnabled,false); app.settings.set(Prefs.initialEnglish,false); app.settings.set(Prefs.hardwarePolicy,"AUTO"); app.settings.set(Prefs.shortcut,true); app.settings.set(Prefs.englishPrediction,true); app.settings.set(Prefs.japanesePrediction,true); app.settings.set(Prefs.candidateCount,30); app.settings.set(Prefs.numberRow,true); app.settings.set(Prefs.keyHeight,40); app.settings.set(Prefs.heightPercent,100)
             withTimeout(30_000) { app.japaneseDictionary.engine.first { it is DictionaryConversionEngine } }
+            withTimeout(30_000) { app.semanticDictionary.lexicon.first { it!=null } }
         }
         activity=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
         await("editor ready") { var found=false; main { found=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; found }
@@ -108,7 +109,7 @@ class DeviceInputTest {
     }
     private fun clickLabel(text: String) {
         var node: AccessibilityNodeInfo?=null
-        await("IME action $text") { node=findNode { it.text?.toString()==text }; node!=null }
+        await("IME action $text") { node=findNode { it.text?.toString()==text || it.contentDescription?.toString()?.startsWith(text)==true }; node!=null }
         // Translation changes the IME window height. Use the native accessibility action
         // instead of screen coordinates that can briefly refer to its previous position.
         assertTrue(node!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
@@ -274,6 +275,60 @@ class DeviceInputTest {
         val full=imeHeight()
         ImeControl.request(DisplayMode.COMPACT); await("compact height") { imeHeight() in 1 until full }
         touch(rect("全表示")); await("full height restored") { imeHeight()>=full }
+    }
+    @Test fun bilingualCandidatesIncludeChairAndLoanword() {
+        letters("ISU"); key(KeyEvent.KEYCODE_SPACE)
+        assertEquals("椅子",inputText())
+        touch(rect("一覧"))
+        assertNotNull(findNode { it.text?.toString()=="イス" })
+        assertNotNull(findNode { it.text?.toString()=="チェア" })
+        assertNotNull(findNode { it.text?.toString()=="chair" })
+        repeat(15) {
+            if (findNode { it.text?.toString()=="chair" && it.isVisibleToUser }==null) {
+                findNode { it.className?.toString()=="android.widget.ScrollView" }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
+                SystemClock.sleep(100)
+            }
+        }
+        clickLabel("chair"); assertEquals("chair",inputText())
+    }
+    @Test fun scriptCycleUsesMeaningAndKeepsTheWholeSpanUncommitted() {
+        letters("ISU")
+        clickLabel("表記を切り替え"); assertEquals("イス",inputText())
+        clickLabel("表記を切り替え"); await("meaning, not romaji") { inputText()=="chair" }
+        main { assertTrue(android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)>=0) }
+        clickLabel("表記を切り替え"); assertEquals("いす",inputText())
+        clickLabel("表記を切り替え"); assertEquals("イス",inputText())
+        key(KeyEvent.KEYCODE_ENTER); assertEquals("イス",inputText())
+        main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
+        clickLabel("表記を切り替え"); assertEquals("イス",inputText())
+    }
+    @Test fun scriptCycleFromKanjiDoesNotReplaceCommittedHistory() {
+        letters("NIHONGO"); key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("日本語",inputText())
+        letters("ISU"); key(KeyEvent.KEYCODE_SPACE); assertEquals("日本語椅子",inputText())
+        clickLabel("表記を切り替え"); assertEquals("日本語イス",inputText())
+        clickLabel("表記を切り替え"); await("only current span translated") { inputText()=="日本語chair" }
+        key(KeyEvent.KEYCODE_ENTER)
+        clickLabel("表記を切り替え"); assertEquals("日本語chair",inputText())
+    }
+    @Test fun cancelledScriptResultCannotChangeLaterTyping() {
+        letters("ISU"); clickLabel("表記を切り替え"); clickLabel("表記を切り替え")
+        key(KeyEvent.KEYCODE_ESCAPE); assertEquals("いす",inputText())
+        letters("HA"); SystemClock.sleep(500)
+        assertEquals("いすは",inputText())
+    }
+    @Test fun scriptCycleTranslatesWholeSentenceOnDeviceAndRestoresReading() {
+        val engine=io.github.user03715910.dualkey.translation.TranslationEngine()
+        try { Assume.assumeTrue("Download the Japanese model first",runBlocking { engine.ready() }) }
+        finally { engine.close() }
+        letters("KYOUHAIITENKIDESU")
+        clickLabel("表記を切り替え"); assertEquals("キョウハイイテンキデス",inputText())
+        clickLabel("表記を切り替え")
+        await("whole sentence translated") { inputText().any { it in 'a'..'z' || it in 'A'..'Z' } }
+        assertFalse(inputText().equals("kyouhaiitenkidesu",true))
+        main { assertTrue(android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)>=0) }
+        assertNotNull(findNode { it.contentDescription?.toString()=="powered by Google Translate" })
+        clickLabel("表記を切り替え"); assertEquals("きょうはいいてんきです",inputText())
     }
     @Test fun flickDirectionsAndNumberRow() {
         touch(rect("あ行")); touch(rect("あ行"),dx=-100); touch(rect("あ行"),dy=-100)

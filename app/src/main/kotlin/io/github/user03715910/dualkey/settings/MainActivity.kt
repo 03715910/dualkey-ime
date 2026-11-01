@@ -376,8 +376,9 @@ class MainActivity : AppCompatActivity() {
         section("利用技術と動作確認") {
             text("Android 8.0以上 / バージョン ${BuildConfig.VERSION_NAME}（${BuildConfig.VERSION_CODE}）")
             text("Mozcの公開辞書データを使う独自の変換処理です。Mozc本体ではなく、長文や固有名詞の変換には限界があります。Samsung実機・Bluetooth/USBの実接続は追加確認が必要です。")
+            text("英語とカタカナの追加候補には、James William BREEN と EDRDG のJMdictを加工した辞書（CC BY-SA 4.0）を使用しています。複数の意味を持つ語では訳語を確認してください。")
             button("ライセンスを表示") {
-                val notices=listOf("NOTICE.txt","japanese/LICENSE-MOZC.txt","japanese/LICENSE-DICTIONARY.txt","japanese/LICENSE-UNICODE.txt")
+                val notices=listOf("NOTICE.txt","japanese/LICENSE-MOZC.txt","japanese/LICENSE-DICTIONARY.txt","japanese/LICENSE-UNICODE.txt","semantic/LICENSE-JMDICT.txt","semantic/LICENSE-CC-BY-SA-4.0.txt")
                     .joinToString("\n\n") { name -> assets.open(name).bufferedReader().use { it.readText() } }
                 AlertDialog.Builder(this).setTitle("ライセンス・利用技術").setMessage(notices).setPositiveButton("閉じる",null).show()
             }
