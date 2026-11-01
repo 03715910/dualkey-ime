@@ -39,6 +39,17 @@ class SemanticConversionTest {
         val ranked=Personalization.candidates("みず",values,listOf(LearnedChoice("みず","water",3,10)),false,30)
         assertEquals("water",ranked.first().text)
     }
+    @Test fun japaneseChoiceDisambiguatesWordsWithTheSameReading() {
+        val bridge=SemanticConversion.augment("はし",listOf(Candidate("橋","はし")),lexicon,30).map { it.text }
+        val chopsticks=SemanticConversion.augment("はし",listOf(Candidate("箸","はし")),lexicon,30).map { it.text }
+        assertTrue(bridge.toString(),"bridge" in bridge)
+        assertFalse(bridge.toString(),"chopsticks" in bridge)
+        assertTrue(chopsticks.toString(),"chopsticks" in chopsticks)
+        assertFalse(chopsticks.toString(),"bridge" in chopsticks)
+        val chair=SemanticConversion.augment("いす",listOf(Candidate("椅子","いす")),lexicon,30).map { it.text }
+        assertTrue("chair" in chair)
+        assertFalse("swords" in chair)
+    }
     @Test fun wholeCompositionReturnsToOriginalHiraganaAcrossCycles() {
         val first=CompositionVariant.start("きょうはいすをかいます","今日は椅子を買います")
         assertEquals("キョウハイスヲカイマス",first.text)

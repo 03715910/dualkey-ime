@@ -16,14 +16,15 @@ object SemanticConversion {
     fun augment(reading: String, base: List<Candidate>, lexicon: JapaneseLexicon?, limit: Int): List<Candidate> {
         val maximum=limit.coerceIn(2,1000)
         if (reading.none { it in 'ぁ'..'ゖ' }) return base.take(maximum)
-        val meanings=equivalents(lexicon,reading)
+        val japanese=base.firstOrNull { it.reading==reading }?.text ?: reading
+        val meanings=equivalents(lexicon,reading,japanese)
         val additions=(listOf(katakana(reading)) + meanings.filter { it.any { c -> c in 'ァ'..'ヶ' } } +
             meanings.filter { it.any { c -> c in 'a'..'z' || c in 'A'..'Z' } })
             .distinct().filter { value -> base.take(8).none { it.text==value } }.take(minOf(8,maximum/3))
         if (additions.isEmpty()) return base.take(maximum)
         val extraSet=additions.toSet()
-        val japanese=base.filterNot { it.text in extraSet }.take(maximum-additions.size)
-        return japanese + additions.map { Candidate(it,reading) }
+        val leading=base.filterNot { it.text in extraSet }.take(maximum-additions.size)
+        return leading + additions.map { Candidate(it,reading) }
     }
 }
 
