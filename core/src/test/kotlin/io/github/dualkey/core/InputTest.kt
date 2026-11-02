@@ -21,9 +21,23 @@ class InputTest {
     }
     @Test fun mixedFlickAndRomajiDeletion() {
         val c=Composer(); c.append("あ"); c.append("kyo"); assertEquals("あきょ",c.text)
-        c.delete(); assertEquals("あky",c.text); c.append("u"); assertEquals("あきゅ",c.text)
+        c.delete(); assertEquals("あき",c.text); c.append("u"); assertEquals("あきう",c.text)
         c.clear(); assertTrue(c.isEmpty); assertFalse(c.delete())
         c.append("あ😀"); c.delete(); assertEquals("あ",c.text)
+    }
+    @Test fun deletesConvertedKanaRatherThanOriginalRomaji() {
+        listOf("ka" to "", "k" to "", "ky" to "k", "nn" to "", "nna" to "ん",
+            "tta" to "っ", "kyo" to "き", "nihongo" to "にほん", "kan" to "か").forEach { (raw,expected) ->
+            val c=Composer(); c.append(raw); assertTrue(c.delete()); assertEquals(raw,expected,c.text)
+        }
+        val c=Composer(); c.append("kak"); c.delete(); assertEquals("か",c.text)
+        c.append("na"); assertEquals("かな",c.text); c.delete(); c.delete(); assertTrue(c.isEmpty)
+    }
+    @Test fun japanesePunctuationIsFullWidthWithoutChangingNumbersOrRomajiN() {
+        assertEquals("？！（）：；＠１２",Romaji.convert("?!():;@１２"))
+        assertEquals("、。「」・ー1230",Romaji.convert(",.[]/-1230"))
+        assertEquals("かんい",Romaji.convert("kan'i"))
+        assertEquals("ん？",Romaji.convert("n?"))
     }
     @Test fun kanjiSentencesAndUserDictionary() {
         val engine=LocalConversionEngine { mapOf("でゅある" to listOf("DualKey")) }

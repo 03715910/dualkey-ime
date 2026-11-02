@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.dualkey.core.HardwarePolicy
+import io.github.dualkey.core.ToggleShortcut
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
@@ -25,6 +26,8 @@ object Prefs {
     val rememberManual = booleanPreferencesKey("remember_manual")
     val savedManual = stringPreferencesKey("saved_manual")
     val shortcut = booleanPreferencesKey("shortcut_ctrl_alt_k")
+    val displayShortcutKey = stringPreferencesKey("visibility_toggle_key")
+    val displayShortcutModifiers = intPreferencesKey("visibility_toggle_modifiers")
     val ctrlSpace = booleanPreferencesKey("shortcut_ctrl_space")
     val layout = stringPreferencesKey("hardware_layout")
     val japanesePrediction = booleanPreferencesKey("japanese_prediction")
@@ -51,7 +54,10 @@ data class Settings(val p: Preferences = emptyPreferences()) {
     val rememberManual get() = p[Prefs.rememberManual] ?: false
     val savedManual get() = p[Prefs.savedManual]
     val shortcut get() = p[Prefs.shortcut] ?: true
+    val displayShortcut get() = ToggleShortcut(p[Prefs.displayShortcutKey] ?: "K",p[Prefs.displayShortcutModifiers] ?: (ToggleShortcut.CTRL or ToggleShortcut.ALT))
+        .takeIf { it.valid } ?: ToggleShortcut()
     val ctrlSpace get() = p[Prefs.ctrlSpace] ?: true
+    val jisKeyboard get() = p[Prefs.layout] != "US"
     val japanesePrediction get() = p[Prefs.japanesePrediction] ?: true
     val englishPrediction get() = p[Prefs.englishPrediction] ?: true
     val candidateCount get() = (p[Prefs.candidateCount] ?: 100).coerceIn(2,1000)
@@ -79,6 +85,10 @@ class SettingsStore(private val context: Context, scope: CoroutineScope) {
     } }
     suspend fun awaitLoaded() { ready.await() }
     suspend fun <T> set(key: Preferences.Key<T>, value: T) { context.store.edit { it[key] = value } }
+    suspend fun setDisplayShortcut(value: ToggleShortcut) {
+        require(value.valid)
+        context.store.edit { it[Prefs.displayShortcutKey]=value.key; it[Prefs.displayShortcutModifiers]=value.modifiers }
+    }
     suspend fun addWord(reading: String, word: String) {
         context.store.edit {
             val json = JSONObject(it[Prefs.dictionary] ?: "{}")

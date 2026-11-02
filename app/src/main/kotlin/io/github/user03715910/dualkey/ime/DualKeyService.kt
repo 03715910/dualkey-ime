@@ -36,6 +36,9 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var requestedLimit=0
     private val translator = TranslationEngine()
     private var ui: KeyboardUi? = null
+    private val hardwarePanel by lazy { HardwareCandidatePanel(this,::commitCandidate) }
+    private var hardwareCandidates=false
+    private var candidateHostRequested=false
     private var english = false
     private var shift = 0
     private var lastShift = 0L
@@ -63,6 +66,13 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var inputStarted = false
     private var lastPolicy: HardwarePolicy? = null
 
+    // Explicit support diagnostics contain state only, never composing or committed text.
+    override fun dump(fd: java.io.FileDescriptor?,writer: java.io.PrintWriter?,args: Array<out String>?) {
+        writer?.println("DualKey: requested=$hardwareCandidates, converting=$converting, continuation=$continuationCandidates, selected=$selected, choices=${candidates.size}")
+        writer?.println("started=$inputStarted, sensitive=$sensitive, english=$english, predictions=$predictionsAllowed, mode=${visibility.mode}")
+        writer?.println("attributeToken=${window?.window?.attributes?.token!=null}, decorToken=${window?.window?.decorView?.windowToken!=null}, panel=${hardwarePanel.status}")
+    }
+
     override fun onCreate() {
         super.onCreate()
         inputManager = getSystemService(InputManager::class.java)
@@ -87,6 +97,30 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     override fun onCreateInputView(): View = KeyboardUi(this,::onScreenKey,::feedback).also { ui=it; it.dictionaryStatus(app.japaneseDictionary.message.value); rebuild(); refreshCandidates(); updateNavigationAppearance() }.root
     override fun onWindowShown() { super.onWindowShown(); updateNavigationAppearance() }
+    override fun onWindowHidden() { hardwareCandidates=false; candidateHostRequested=false; hardwarePanel.dismiss(); super.onWindowHidden() }
+    override fun onCreateCandidatesView(): View = object: View(this) {
+        override fun onMeasure(widthMeasureSpec: Int,heightMeasureSpec: Int) {
+            // InputMethodService supplies WRAP_CONTENT, so the host must explicitly measure to zero.
+            setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec),0)
+        }
+    }
+    override fun onComputeInsets(outInsets: InputMethodService.Insets) {
+        super.onComputeInsets(outInsets)
+        if (visibility.mode==DisplayMode.HIDDEN) {
+            // The empty candidates host keeps the IME's subwindow available without reserving keyboard space.
+            val height=window?.window?.decorView?.height ?: 0
+            outInsets.contentTopInsets=height; outInsets.visibleTopInsets=height
+            outInsets.touchableInsets=InputMethodService.Insets.TOUCHABLE_INSETS_REGION
+            outInsets.touchableRegion.setEmpty()
+        }
+    }
+    override fun onFinishInputView(finishingInput: Boolean) {
+        // Hiding only the UI must not finish the composing span owned by the still-active IME.
+        if (finishingInput) super.onFinishInputView(true)
+    }
+    override fun onFinishCandidatesView(finishingInput: Boolean) {
+        if (finishingInput) super.onFinishCandidatesView(true)
+    }
     private fun updateNavigationAppearance() {
         window?.window?.let { w -> WindowCompat.getInsetsController(w,w.decorView).isAppearanceLightNavigationBars=
             resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK != Configuration.UI_MODE_NIGHT_YES }
@@ -98,7 +132,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         return visibility.mode != DisplayMode.HIDDEN
     }
     override fun onShowInputRequested(flags: Int, configChange: Boolean): Boolean {
-        return visibility.mode != DisplayMode.HIDDEN
+        return visibility.mode != DisplayMode.HIDDEN || candidateHostRequested
     }
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
         super.onStartInput(attribute,restarting)
@@ -121,21 +155,28 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             variation in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI))
         shift=0; symbols=false
         detectHardware(); rebuild(); refreshCandidates()
+        if (!sensitive && predictionsAllowed) runCatching {
+            val mode=InputConnection.CURSOR_UPDATE_IMMEDIATE or InputConnection.CURSOR_UPDATE_MONITOR
+            if (Build.VERSION.SDK_INT>=33) currentInputConnection?.requestCursorUpdates(mode,InputConnection.CURSOR_UPDATE_FILTER_INSERTION_MARKER)
+            else currentInputConnection?.requestCursorUpdates(mode)
+        }
         Handler(Looper.getMainLooper()).post { applyVisibility(false) }
     }
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) { super.onStartInputView(info,restarting); rebuild(); refreshCandidates() }
     override fun onFinishInput() {
+        runCatching { currentInputConnection?.requestCursorUpdates(0) }
         commitComposition(); finishEnglish()
         currentInputConnection?.finishComposingText()
         clearState(); inputStarted=false; ImeControl.inputActive=false; session++
         super.onFinishInput()
     }
     override fun onDestroy() {
+        hardwarePanel.dismiss()
         inputManager.unregisterInputDeviceListener(this)
         translator.close(); scope.cancel(); ImeControl.inputActive=false
         super.onDestroy()
     }
-    override fun onConfigurationChanged(newConfig: Configuration) { super.onConfigurationChanged(newConfig); detectHardware(); rebuild(); applyVisibility(true) }
+    override fun onConfigurationChanged(newConfig: Configuration) { hardwarePanel.clearCursor(); super.onConfigurationChanged(newConfig); detectHardware(); rebuild(); applyVisibility(true); showHardwareCandidates() }
     override fun onInputDeviceAdded(deviceId: Int) = hardwareChanged()
     override fun onInputDeviceRemoved(deviceId: Int) = hardwareChanged()
     override fun onInputDeviceChanged(deviceId: Int) = hardwareChanged()
@@ -148,6 +189,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         visibility.connectionChanged(connected,remembered)
     }
     private fun chooseDisplay(mode: DisplayMode) {
+        hardwareCandidates=false; closeHardwarePanel(true)
         visibility.manual=mode
         if (settings.rememberManual && visibility.connected) scope.launch { app.settings.set(Prefs.savedManual, mode.name) }
         rebuild(); applyVisibility(true)
@@ -172,6 +214,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun resetVariant() { variantJob?.cancel(); variantJob=null; variant=null }
     private fun clearState() {
+        hardwareCandidates=false; closeHardwarePanel(true); hardwarePanel.clearCursor()
         committedTail=null; continuationCandidates=false
         candidateJob?.cancel(); candidateQuery=null; candidateLoading=false; requestedReading=""; requestedLimit=0
         invalidateTranslation(); resetVariant(); composer.clear(); englishWord=""; candidates=emptyList(); candidateRecords=emptyList(); selected=-1; converting=false
@@ -231,6 +274,32 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val canExpand=candidateQuery?.let { it.limit<1000 && candidates.size>=it.limit }==true
         ui?.googleComposition(variant?.takeIf { it.googlePowered }?.text)
         ui?.candidates(candidates,selected,::commitCandidate,canExpand,candidateLoading)
+        showHardwareCandidates()
+    }
+    private fun showHardwareCandidates() {
+        if (!hardwareCandidates || !inputStarted || sensitive || english || !predictionsAllowed ||
+            (!converting && !continuationCandidates) || selected !in candidates.indices) {
+            closeHardwarePanel(); return
+        }
+        if (visibility.mode==DisplayMode.HIDDEN && !candidateHostRequested) {
+            candidateHostRequested=true
+            setCandidatesViewShown(true)
+            // A fresh official show request is also needed after a previous hide request.
+            // onEvaluateInputViewShown still keeps the letter keys hidden.
+            if (Build.VERSION.SDK_INT>=28) requestShowSelf(0) else showLegacy()
+        }
+        val top=ui?.root?.takeIf { visibility.mode!=DisplayMode.HIDDEN && isInputViewShown && it.isShown }
+            ?.let { view -> IntArray(2).also(view::getLocationOnScreen)[1] }
+        hardwarePanel.show(window?.window?.decorView?.windowToken,candidates,selected,continuationCandidates,top)
+    }
+    private fun closeHardwarePanel(releaseHost: Boolean=false) {
+        hardwarePanel.dismiss()
+        // Keep the zero-height host during this input session so Enter -> Tab cannot race an old hide.
+        if (releaseHost && candidateHostRequested) { candidateHostRequested=false; setCandidatesViewShown(false) }
+    }
+    override fun onUpdateCursorAnchorInfo(info: CursorAnchorInfo) {
+        super.onUpdateCursorAnchorInfo(info)
+        hardwarePanel.cursor(info); showHardwareCandidates()
     }
     private fun moreCandidates() {
         if (candidateLoading || composer.isEmpty || sensitive || english) return
@@ -269,6 +338,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             CommittedTail(candidate,cursorPosition()) else null
     }
     private fun commitComposition(learn: Boolean=false) {
+        hardwareCandidates=false
         if (!composer.isEmpty) {
             val candidate=variant?.let { Candidate(it.text,it.reading) } ?:
                 if (converting && selected in candidateRecords.indices) candidateRecords[selected] else Candidate(composer.reading,composer.reading)
@@ -282,6 +352,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun commitCandidate(index: Int) {
         if (index !in candidates.indices) return
+        hardwareCandidates=false
         if (continuationCandidates) {
             val tail=committedTail
             if (tail==null || !validTail(tail) || !composer.isEmpty) { committedTail=null; refreshCandidates(); return }
@@ -305,6 +376,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         resetConversion(); refreshCandidates()
     }
     private fun type(value: String) {
+        hardwareCandidates=false
         invalidateTranslation()
         if (sensitive || numeric) { currentInputConnection?.commitText(value,1); return }
         if (english) {
@@ -374,6 +446,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         }
     }
     private fun onScreenKey(key: String) {
+        hardwareCandidates=false; hardwarePanel.dismiss()
         when (key) {
             "more_candidates" -> moreCandidates()
             "cycle_script" -> cycleScript()
@@ -403,17 +476,28 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         var handled=true
         when {
-            settings.shortcut && keyCode==KeyEvent.KEYCODE_K && event.isCtrlPressed && event.isAltPressed -> {
+            settings.shortcut && settings.displayShortcut.matches(HardwareShortcuts.key(keyCode),HardwareShortcuts.modifiers(event)) -> {
                 if (event.repeatCount==0) chooseDisplay(if (visibility.mode==DisplayMode.FULL) DisplayMode.HIDDEN else DisplayMode.FULL)
             }
             settings.ctrlSpace && keyCode==KeyEvent.KEYCODE_SPACE && event.isCtrlPressed && !event.isAltPressed -> { if (event.repeatCount==0) switchMode() }
             keyCode in setOf(KeyEvent.KEYCODE_ZENKAKU_HANKAKU,KeyEvent.KEYCODE_LANGUAGE_SWITCH) -> { if (event.repeatCount==0) switchMode() }
+            settings.jisKeyboard && keyCode==KeyEvent.KEYCODE_GRAVE && !event.isShiftPressed && !event.isCtrlPressed && !event.isAltPressed && !event.isMetaPressed -> {
+                // Some JIS hardware reports the key above Tab as GRAVE instead of ZENKAKU_HANKAKU.
+                if (event.repeatCount==0) switchMode()
+            }
             keyCode==KeyEvent.KEYCODE_EISU -> switchMode(true)
             keyCode==KeyEvent.KEYCODE_KANA || keyCode==KeyEvent.KEYCODE_KATAKANA_HIRAGANA -> switchMode(false)
-            keyCode==KeyEvent.KEYCODE_HENKAN && !english -> space()
+            keyCode==KeyEvent.KEYCODE_HENKAN && !english -> { hardwareCandidates=!composer.isEmpty; space() }
             keyCode==KeyEvent.KEYCODE_MUHENKAN && !english && !composer.isEmpty -> { invalidateTranslation(); resetVariant(); resetConversion(); syncComposition() }
             event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> { commitComposition(); committedTail=null; finishEnglish(); handled=false }
-            keyCode==KeyEvent.KEYCODE_SPACE -> space()
+            keyCode==KeyEvent.KEYCODE_SPACE -> { hardwareCandidates=!english && !composer.isEmpty; space() }
+            keyCode==KeyEvent.KEYCODE_TAB && !english && !sensitive && candidates.isNotEmpty() && (converting || continuationCandidates) -> {
+                // Only take Tab when there are actual choices. Ordinary form navigation is untouched.
+                hardwareCandidates=true
+                val step=if (event.isShiftPressed) -1 else 1
+                selected=if (selected<0) (if (step>0) 0 else candidates.lastIndex) else (selected+step+candidates.size)%candidates.size
+                if (converting) syncComposition() else showCandidates()
+            }
             keyCode==KeyEvent.KEYCODE_ENTER || keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER -> enter()
             keyCode==KeyEvent.KEYCODE_DEL -> delete()
             keyCode==KeyEvent.KEYCODE_ESCAPE && (continuationCandidates || !composer.isEmpty || englishWord.isNotEmpty()) -> {
@@ -423,11 +507,13 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 else if (converting) { resetConversion(); syncComposition() } else { composer.clear(); englishWord=""; currentInputConnection?.setComposingText("",1); currentInputConnection?.finishComposingText(); refreshCandidates() }
             }
             keyCode in setOf(KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_DOWN) -> {
-                if (continuationCandidates && visibility.mode!=DisplayMode.HIDDEN && candidates.isNotEmpty() && (selected>=0 || keyCode==KeyEvent.KEYCODE_DPAD_UP || keyCode==KeyEvent.KEYCODE_DPAD_DOWN)) {
+                if (continuationCandidates && (visibility.mode!=DisplayMode.HIDDEN || hardwareCandidates) && candidates.isNotEmpty() && (selected>=0 || keyCode==KeyEvent.KEYCODE_DPAD_UP || keyCode==KeyEvent.KEYCODE_DPAD_DOWN)) {
+                    hardwareCandidates=true
                     val step=if (keyCode==KeyEvent.KEYCODE_DPAD_LEFT || keyCode==KeyEvent.KEYCODE_DPAD_UP) -1 else 1
                     selected=if (selected<0) (if (step>0) 0 else candidates.lastIndex) else (selected+step+candidates.size)%candidates.size
                     showCandidates()
                 } else if (converting && candidates.isNotEmpty()) {
+                    hardwareCandidates=true
                     val step=if (keyCode==KeyEvent.KEYCODE_DPAD_LEFT || keyCode==KeyEvent.KEYCODE_DPAD_UP) -1 else 1
                     selected=(selected+step+candidates.size)%candidates.size; syncComposition()
                 } else { commitComposition(); committedTail=null; finishEnglish(); refreshCandidates(); handled=false }

@@ -13,6 +13,7 @@ import androidx.core.view.*
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.dualkey.core.DisplayMode
+import io.github.dualkey.core.ToggleShortcut
 import io.github.user03715910.dualkey.data.Prefs
 import io.github.user03715910.dualkey.settings.MainActivity
 import kotlinx.coroutines.runBlocking
@@ -40,7 +41,14 @@ class DeviceInputTest {
         fail("Timed out: $label; input=${if (::editor.isInitialized) inputText() else "not ready"}; IME=${labels.joinToString(" | ")}")
     }
     private fun inputText(): String { var value=""; main { value=editor.text.toString() }; return value }
-    private fun imeHeight(): Int { var value=0; main { value=ViewCompat.getRootWindowInsets(activity.window.decorView)?.getInsets(WindowInsetsCompat.Type.ime())?.bottom ?: 0 }; return value }
+    private fun imeHeight(): Int {
+        var value=0
+        main { ViewCompat.getRootWindowInsets(activity.window.decorView)?.let { insets ->
+            // An empty IME host may include the existing system navigation bar, not keyboard space.
+            value=(insets.getInsets(WindowInsetsCompat.Type.ime()).bottom-insets.getInsets(WindowInsetsCompat.Type.systemBars()).bottom).coerceAtLeast(0)
+        } }
+        return value
+    }
     @Before fun openEditor() {
         val component=android.content.ComponentName(instrumentation.targetContext.packageName,
             "io.github.user03715910.dualkey.ime.DualKeyService").flattenToShortString()
@@ -50,9 +58,10 @@ class DeviceInputTest {
         }
         assertEquals(component,android.provider.Settings.Secure.getString(instrumentation.targetContext.contentResolver,"default_input_method"))
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
-        runBlocking { app.settings.awaitLoaded(); app.settings.set(Prefs.learningEnabled,false); app.settings.set(Prefs.initialEnglish,false); app.settings.set(Prefs.hardwarePolicy,"AUTO"); app.settings.set(Prefs.shortcut,true); app.settings.set(Prefs.englishPrediction,true); app.settings.set(Prefs.japanesePrediction,true); app.settings.set(Prefs.candidateCount,30); app.settings.set(Prefs.numberRow,true); app.settings.set(Prefs.keyHeight,40); app.settings.set(Prefs.heightPercent,100)
+        runBlocking { app.settings.awaitLoaded(); app.settings.set(Prefs.learningEnabled,false); app.settings.set(Prefs.initialEnglish,false); app.settings.set(Prefs.layout,"JIS"); app.settings.set(Prefs.hardwarePolicy,"AUTO"); app.settings.set(Prefs.shortcut,true); app.settings.set(Prefs.englishPrediction,true); app.settings.set(Prefs.japanesePrediction,true); app.settings.set(Prefs.candidateCount,30); app.settings.set(Prefs.numberRow,true); app.settings.set(Prefs.keyHeight,40); app.settings.set(Prefs.heightPercent,100)
             withTimeout(30_000) { app.japaneseDictionary.engine.first { it is DictionaryConversionEngine } }
             withTimeout(30_000) { app.semanticDictionary.lexicon.first { it!=null } }
+            app.settings.setDisplayShortcut(ToggleShortcut())
         }
         activity=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
         await("editor ready") { var found=false; main { found=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; found }
@@ -72,9 +81,9 @@ class DeviceInputTest {
         SystemClock.sleep(200)
     }
     @After fun close() { if (::activity.isInitialized) main { activity.finish() } }
-    private fun key(code: Int,meta: Int=0) {
+    private fun key(code: Int,meta: Int=0,repeat: Int=0) {
         val now=SystemClock.uptimeMillis()
-        instrumentation.sendKeySync(KeyEvent(now,now,KeyEvent.ACTION_DOWN,code,0,meta,KeyCharacterMap.VIRTUAL_KEYBOARD,0,0,InputDevice.SOURCE_KEYBOARD))
+        instrumentation.sendKeySync(KeyEvent(now,now,KeyEvent.ACTION_DOWN,code,repeat,meta,KeyCharacterMap.VIRTUAL_KEYBOARD,0,0,InputDevice.SOURCE_KEYBOARD))
         instrumentation.sendKeySync(KeyEvent(now,now+10,KeyEvent.ACTION_UP,code,0,meta,KeyCharacterMap.VIRTUAL_KEYBOARD,0,0,InputDevice.SOURCE_KEYBOARD))
         instrumentation.waitForIdleSync()
     }
@@ -108,17 +117,126 @@ class DeviceInputTest {
         instrumentation.waitForIdleSync()
     }
     private fun clickLabel(text: String) {
-        var node: AccessibilityNodeInfo?=null
-        await("IME action $text") { node=findNode { it.text?.toString()==text || it.contentDescription?.toString()?.startsWith(text)==true }; node!=null }
         // Translation changes the IME window height. Use the native accessibility action
         // instead of screen coordinates that can briefly refer to its previous position.
-        assertTrue(node!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        // Learning may replace a candidate view between its lookup and the action.
+        await("IME action $text") {
+            val node=findNode { it.text?.toString()==text || it.contentDescription?.toString()?.startsWith(text)==true }
+            val clicked=node?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true
+            if (!clicked) node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
+            clicked
+        }
         instrumentation.waitForIdleSync()
     }
     private fun commitTsudukiwo() {
         letters("TSUDUKIWO"); key(KeyEvent.KEYCODE_SPACE)
         await("続きを converted") { inputText().endsWith("続きを") }
         key(KeyEvent.KEYCODE_ENTER)
+    }
+    private fun hardwareNode(description: String): AccessibilityNodeInfo? {
+        fun search(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+            if (node==null) return null
+            if (node.contentDescription?.toString()==description) return node
+            for (i in 0 until node.childCount) search(node.getChild(i))?.let { return it }
+            return null
+        }
+        return instrumentation.uiAutomation.windows.firstNotNullOfOrNull { search(it.root) }
+    }
+    private fun captureHardware(name: String) {
+        val folder=java.io.File(instrumentation.targetContext.getExternalFilesDir(null),"hardware").apply { mkdirs() }
+        val image=instrumentation.uiAutomation.takeScreenshot()
+        java.io.File(folder,"$name.png").outputStream().use { image.compress(android.graphics.Bitmap.CompressFormat.PNG,100,it) }; image.recycle()
+    }
+    private fun assertCandidateOnly() {
+        // Android can retain its IME navigation/caption bar, even with a zero-height input view.
+        assertTrue("Only the OS navigation area remains",imeHeight()<=(48*activity.resources.displayMetrics.density).toInt())
+        assertNull(findNode { it.contentDescription?.toString()?.startsWith("あ行。")==true })
+    }
+    @Test fun physicalBackspaceDeletesDisplayedKanaAndUnfinishedRomaji() {
+        letters("KA"); assertEquals("か",inputText()); key(KeyEvent.KEYCODE_DEL); assertEquals("",inputText())
+        letters("K"); assertEquals("k",inputText()); key(KeyEvent.KEYCODE_DEL); assertEquals("",inputText())
+        letters("KYO"); key(KeyEvent.KEYCODE_DEL); assertEquals("き",inputText()); key(KeyEvent.KEYCODE_DEL); assertEquals("",inputText())
+        letters("NIHONGO"); key(KeyEvent.KEYCODE_DEL); assertEquals("にほん",inputText())
+        letters("MO"); assertEquals("にほんも",inputText()); key(KeyEvent.KEYCODE_ENTER)
+        key(KeyEvent.KEYCODE_DEL); assertEquals("にほん",inputText())
+    }
+    @Test fun physicalJapaneseSymbolsAreFullWidthButEnglishSymbolsStayAscii() {
+        key(KeyEvent.KEYCODE_SLASH,KeyEvent.META_SHIFT_ON); key(KeyEvent.KEYCODE_1,KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_9,KeyEvent.META_SHIFT_ON); key(KeyEvent.KEYCODE_0,KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_1); assertEquals("？！（）1",inputText())
+        key(KeyEvent.KEYCODE_ENTER); key(KeyEvent.KEYCODE_ZENKAKU_HANKAKU)
+        key(KeyEvent.KEYCODE_SLASH,KeyEvent.META_SHIFT_ON); key(KeyEvent.KEYCODE_1,KeyEvent.META_SHIFT_ON)
+        assertEquals("？！（）1?!",inputText())
+    }
+    @Test fun zenkakuHankakuAndJisCompatibilityKeysToggleBothWays() {
+        letters("KA"); key(KeyEvent.KEYCODE_ZENKAKU_HANKAKU); letters("KA"); assertEquals("かka",inputText())
+        key(KeyEvent.KEYCODE_ZENKAKU_HANKAKU); letters("KA"); assertEquals("かkaか",inputText())
+        key(KeyEvent.KEYCODE_GRAVE); letters("A"); assertEquals("かkaかa",inputText())
+        key(KeyEvent.KEYCODE_GRAVE); letters("A"); assertEquals("かkaかaあ",inputText())
+    }
+    @Test fun usLayoutKeepsTheBacktickAsText() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.layout,"US"); app.settings.state.first { !it.jisKeyboard } }
+        key(KeyEvent.KEYCODE_ZENKAKU_HANKAKU); key(KeyEvent.KEYCODE_GRAVE); letters("A")
+        assertEquals("`a",inputText())
+    }
+    @Test fun physicalConversionShowsAListAndCyclesWithSpaceAndArrows() {
+        letters("KYOU"); key(KeyEvent.KEYCODE_SPACE)
+        await("floating conversion list") { hardwareNode("物理候補：今日")?.isSelected==true }
+        captureHardware("conversion-full")
+        assertTrue(activity.hasWindowFocus())
+        key(KeyEvent.KEYCODE_SPACE); assertNotEquals("今日",inputText())
+        key(KeyEvent.KEYCODE_DPAD_UP); assertEquals("今日",inputText())
+        key(KeyEvent.KEYCODE_DPAD_DOWN); val second=inputText()
+        key(KeyEvent.KEYCODE_DPAD_LEFT); assertEquals("今日",inputText())
+        key(KeyEvent.KEYCODE_DPAD_RIGHT); assertEquals(second,inputText())
+        key(KeyEvent.KEYCODE_ENTER); assertEquals(second,inputText())
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
+    }
+    @Test fun hiddenHardwareConversionShowsOnlyTheCandidateWindowAndAllowsTouch() {
+        ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
+        letters("KYOU"); key(KeyEvent.KEYCODE_HENKAN)
+        await("floating candidates while keyboard hidden") { hardwareNode("物理候補：今日")!=null }
+        assertCandidateOnly(); captureHardware("conversion-hidden")
+        touch(Rect().also { hardwareNode("物理候補：今日")!!.getBoundsInScreen(it) })
+        instrumentation.waitForIdleSync(); assertEquals("今日",inputText())
+        assertNull(hardwareNode("物理キーボードの候補一覧")); assertCandidateOnly()
+    }
+    @Test fun tabCyclesPostCommitPredictionsInHiddenModeAndShiftTabGoesBack() {
+        ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
+        commitTsudukiwo()
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        key(KeyEvent.KEYCODE_TAB)
+        await("Tab selects first next word") { hardwareNode("物理候補：お願いします")?.isSelected==true }
+        assertEquals("続きを",inputText()); assertCandidateOnly(); captureHardware("next-word-tab")
+        key(KeyEvent.KEYCODE_TAB)
+        assertTrue(hardwareNode("物理候補：教えてください")!!.isSelected)
+        key(KeyEvent.KEYCODE_TAB,KeyEvent.META_SHIFT_ON)
+        assertTrue(hardwareNode("物理候補：お願いします")!!.isSelected)
+        key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("続きを教えてください",inputText())
+        main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+    }
+    @Test fun tabWithoutPredictionsStillMovesToTheNextField() {
+        lateinit var next: EditText
+        main {
+            next=EditText(activity).apply { id=View.generateViewId(); isSingleLine=true }
+            activity.findViewById<android.widget.LinearLayout>(R.id.page_content).addView(next)
+            editor.nextFocusForwardId=next.id
+        }
+        key(KeyEvent.KEYCODE_TAB)
+        await("ordinary Tab focus navigation") { var focused=false; main { focused=next.hasFocus() }; focused }
+    }
+    @Test fun floatingCandidatesCancelOnEscapeTypingAndSelection() {
+        letters("KYOU"); key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_ESCAPE)
+        assertEquals("きょう",inputText()); assertNull(hardwareNode("物理キーボードの候補一覧"))
+        key(KeyEvent.KEYCODE_SPACE); letters("HA")
+        assertEquals("今日は",inputText()); assertNull(hardwareNode("物理キーボードの候補一覧"))
+        key(KeyEvent.KEYCODE_ENTER); key(KeyEvent.KEYCODE_TAB)
+        main { editor.setSelection(0,editor.length()) }
+        await("candidate panel discarded after selection") { hardwareNode("物理キーボードの候補一覧")==null }
     }
     @Test fun nextWordsRemainAfterUnderlineDisappearsAndAppendOnTap() {
         commitTsudukiwo()
@@ -337,6 +455,32 @@ class DeviceInputTest {
         key(KeyEvent.KEYCODE_K,KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON)
         await("shortcut restored keyboard") { imeHeight()>300 }
     }
+    @Test fun customShortcutTogglesBothDirectionsAndDoesNotStealAnotherChord() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        val custom=ToggleShortcut("J",ToggleShortcut.CTRL or ToggleShortcut.SHIFT)
+        runBlocking { app.settings.setDisplayShortcut(custom); app.settings.state.first { it.displayShortcut==custom } }
+        val chord=KeyEvent.META_CTRL_ON or KeyEvent.META_SHIFT_ON
+        key(KeyEvent.KEYCODE_K,KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON)
+        assertTrue(imeHeight()>300)
+        letters("KA")
+        key(KeyEvent.KEYCODE_J,chord); await("custom chord hides") { imeHeight()==0 }
+        key(KeyEvent.KEYCODE_J,chord,1); assertEquals(0,imeHeight())
+        letters("NA"); assertEquals("かな",inputText())
+        key(KeyEvent.KEYCODE_J,chord); await("same custom chord restores") { imeHeight()>300 }
+        assertEquals("かな",inputText())
+        key(KeyEvent.KEYCODE_J,chord or KeyEvent.META_ALT_ON); assertTrue(imeHeight()>300)
+    }
+    @Test fun visibilityShortcutCanBeDisabledAndCustomChoiceSurvivesInputRestart() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        val custom=ToggleShortcut("U",ToggleShortcut.CTRL or ToggleShortcut.ALT)
+        runBlocking { app.settings.setDisplayShortcut(custom); app.settings.set(Prefs.shortcut,false); app.settings.state.first { !it.shortcut && it.displayShortcut==custom } }
+        key(KeyEvent.KEYCODE_U,KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON); assertTrue(imeHeight()>300)
+        runBlocking { app.settings.set(Prefs.shortcut,true); app.settings.state.first { it.shortcut } }
+        main { activity.getSystemService(InputMethodManager::class.java).restartInput(editor) }
+        SystemClock.sleep(200)
+        key(KeyEvent.KEYCODE_U,KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON); await("stored chord hides after restart") { imeHeight()==0 }
+        key(KeyEvent.KEYCODE_U,KeyEvent.META_CTRL_ON or KeyEvent.META_ALT_ON); await("stored chord restores after restart") { imeHeight()>300 }
+    }
     @Test fun compactModeUsesLessSpaceAndCanRecoverWithTouch() {
         val full=imeHeight()
         ImeControl.request(DisplayMode.COMPACT); await("compact height") { imeHeight() in 1 until full }
@@ -447,9 +591,10 @@ class DeviceInputTest {
     }
     @Test fun physicalEnglishHonorsShiftAndCaps() {
         key(KeyEvent.KEYCODE_EISU)
-        key(KeyEvent.KEYCODE_A); key(KeyEvent.KEYCODE_A,KeyEvent.META_SHIFT_ON); key(KeyEvent.KEYCODE_A,KeyEvent.META_CAPS_LOCK_ON)
+        key(KeyEvent.KEYCODE_A); key(KeyEvent.KEYCODE_A,KeyEvent.META_SHIFT_ON); key(KeyEvent.KEYCODE_B)
+        key(KeyEvent.KEYCODE_A,KeyEvent.META_CAPS_LOCK_ON); key(KeyEvent.KEYCODE_A,KeyEvent.META_CAPS_LOCK_ON or KeyEvent.META_SHIFT_ON)
         key(KeyEvent.KEYCODE_SPACE)
-        assertEquals("aAA ",inputText())
+        assertEquals("aAbAa ",inputText())
     }
     @Test fun passwordDisablesSuggestionsAndTranslation() {
         main { editor.inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; editor.setText(""); activity.getSystemService(InputMethodManager::class.java).restartInput(editor) }

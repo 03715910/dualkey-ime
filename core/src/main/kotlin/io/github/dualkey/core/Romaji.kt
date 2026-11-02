@@ -27,7 +27,11 @@ object Romaji {
         var i = 0
         while (i < s.length) {
             val c = s[i]
-            if (c !in 'a'..'z' && c !in "-,.[]/") { append(c); i++; continue }
+            if (c !in 'a'..'z' && c !in "-,.[]/") {
+                // Japanese punctuation uses full-width forms; numbers stay half-width.
+                append(if (c in '!'..'~' && !c.isLetterOrDigit()) c + 0xfee0 else c)
+                i++; continue
+            }
             if (i+1 < s.length && c == s[i+1] && c in "bcdfghjklmpqrstvwxyz") { append('っ'); i++; continue }
             if (c == 'n') {
                 if (i+2 == s.length && s[i+1] == 'n') { append('ん'); i+=2; continue }
@@ -48,7 +52,14 @@ class Composer {
     val reading get() = Romaji.convert(raw.toString(), true)
     val isEmpty get() = raw.isEmpty()
     fun append(value: String) { raw.append(value) }
-    fun delete(): Boolean { if (raw.isEmpty()) return false; raw.delete(raw.offsetByCodePoints(raw.length,-1),raw.length); return true }
+    fun delete(): Boolean {
+        if (raw.isEmpty()) return false
+        // Once converted, delete a displayed character instead of undoing a romaji key.
+        // Unfinished suffixes (k, ky, n, ...) remain romaji and can still be completed.
+        val rendered=text
+        replace(rendered.substring(0,rendered.offsetByCodePoints(rendered.length,-1)))
+        return true
+    }
     fun clear() { raw.clear() }
     fun replace(value: String) { raw.clear(); raw.append(value) }
 }

@@ -58,6 +58,7 @@ class MainActivity : AppCompatActivity() {
     private var checkJob: Job?=null
     private var updateDialog: AlertDialog?=null
     private var permissionDialog: AlertDialog?=null
+    private var shortcutDialog: AlertDialog?=null
     private val permissionLauncher=registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val requested=awaitingPermissionResult && installWhenReady && page==Page.UPDATES
         awaitingPermissionResult=false
@@ -107,16 +108,18 @@ class MainActivity : AppCompatActivity() {
         lifecycleScope.launch {
             app.settings.awaitLoaded()
             uiReady=true
-            if (intent.getBooleanExtra("settings",false)) page=Page.SETTINGS
-            if (intent.getBooleanExtra("updates",false)) page=Page.UPDATES
-            if (intent.getBooleanExtra("restore_keyboard",false)) page=Page.HOME
+            if (savedInstanceState==null) {
+                if (intent.getBooleanExtra("settings",false)) page=Page.SETTINGS
+                if (intent.getBooleanExtra("updates",false)) page=Page.UPDATES
+                if (intent.getBooleanExtra("restore_keyboard",false)) page=Page.HOME
+            }
             promptOnAvailable=app.settings.state.value.autoCheck && page!=Page.UPDATES && !intent.getBooleanExtra("restore_keyboard",false)
             selectPage(page)
             launch { app.updates.state.collect { renderUpdate(it) } }
             launch { app.learning.message.collect { message -> pageContent.findViewWithTag<TextView>("learning_status")?.text=message } }
             if (!app.updates.state.value.busy) app.updates.restoreCached()
             resumeInstallationFlow()
-            if (intent.getBooleanExtra("restore_keyboard",false)) restoreKeyboard()
+            if (savedInstanceState==null && intent.getBooleanExtra("restore_keyboard",false)) restoreKeyboard()
             if (app.settings.state.value.autoCheck && !awaitingPermissionResult && !installWhenReady) requestCheck(true)
         }
     }
@@ -148,7 +151,7 @@ class MainActivity : AppCompatActivity() {
         out.putBoolean("awaitingPermissionResult",awaitingPermissionResult); out.putLong("promptedVersion",promptedVersion)
         super.onSaveInstanceState(out)
     }
-    override fun onDestroy() { updateDialog?.dismiss(); permissionDialog?.dismiss(); translator.close(); super.onDestroy() }
+    override fun onDestroy() { updateDialog?.dismiss(); permissionDialog?.dismiss(); shortcutDialog?.dismiss(); translator.close(); super.onDestroy() }
     private fun text(value: String,size: Float=14f)=ui.label(value,size,secondary=size<16).also(content::addView)
     private fun button(label: String,primary: Boolean=false,action: ()->Unit)=ui.button(content,label,primary,action)
     private fun section(title: String,subtitle: String?=null,body: ()->Unit) {
@@ -283,9 +286,20 @@ class MainActivity : AppCompatActivity() {
             text("接続を解除すると通常表示に戻ります。完全非表示からは、ホームの表示ボタンで復帰できます。")
         }
         section("ショートカット") {
-            toggle("Ctrl + Alt + K で表示切り替え",Prefs.shortcut,s.shortcut)
+            toggle("表示／非表示ショートカットを使う",Prefs.shortcut,s.shortcut)
+            button("キーの組合せを変更（${s.displayShortcut.label}）") {
+                shortcutDialog=ShortcutDialog.show(this,s.displayShortcut) { value -> lifecycleScope.launch {
+                    app.settings.setDisplayShortcut(value)
+                    app.settings.state.first { it.displayShortcut==value }
+                    selectPage(Page.HARDWARE)
+                } }
+            }.tag="configure_visibility_shortcut"
+            text("${s.displayShortcut.label} を押すたびに、通常表示と完全非表示を切り替えます。表示用・非表示用のキーを別々に覚える必要はありません。")
             toggle("Ctrl + Space で日英切り替え",Prefs.ctrlSpace,s.ctrlSpace)
-            text("Spaceで変換、矢印で候補選択、Enterで確定。端末が先に使うキーは画面操作で代用できます。")
+            text("Space／変換キーで縦の候補一覧、Space・矢印で選択、Enterで確定。確定後の続きの予測はTabで選び、Enterで追加できます。Shift＋Tabで前の候補へ戻ります。")
+            text("半角／全角キーで日英を切り替えます。日本語モードの記号は「？」「！」などの全角になり、Backspaceは表示された文字を1文字ずつ消します。端末が先に使うキーは画面操作で代用できます。")
+            selection("半角／全角キーの互換動作",listOf("日本語配列（半角／全角）","英語配列（`を入力）"),if (s.jisKeyboard) 0 else 1) { save(Prefs.layout,if (it==0) "JIS" else "US") }
+            text("日本語配列では、半角／全角キーが「`」として届く機器にも対応します。英語配列の機器で「`」を使う場合は、英語配列を選んでください。実際の文字配列は次のAndroid設定で合わせます。")
             button("Androidのキーボード配列設定") { openIntent(Intent(AndroidSettings.ACTION_HARD_KEYBOARD_SETTINGS)) }
         }
     }
