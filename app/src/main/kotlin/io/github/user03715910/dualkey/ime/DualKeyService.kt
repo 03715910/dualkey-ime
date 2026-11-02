@@ -248,9 +248,12 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun applyVisibility(request: Boolean) {
         updateCaptionVisibility()
-        setCandidatesViewShown(false)
+        // Settings writes can arrive after Space has opened the zero-height candidate host.
+        // Keep that host until an explicit display change or the input session releases it.
+        val candidateHost=visibility.mode==DisplayMode.HIDDEN && candidateHostRequested
+        setCandidatesViewShown(candidateHost)
         updateInputViewShown()
-        if (visibility.mode == DisplayMode.HIDDEN) requestHideSelf(0)
+        if (visibility.mode == DisplayMode.HIDDEN && !candidateHost) requestHideSelf(0)
         else if (request && inputStarted && currentInputConnection != null) {
             if (Build.VERSION.SDK_INT >= 28) requestShowSelf(0) else showLegacy()
         }
