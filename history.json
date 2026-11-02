@@ -1,6 +1,30 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 12,
+    "versionName": "0.1.9",
+    "releaseDate": "2026-11-02",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.9/DualKeyIME-0.1.9.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "aeba4715fb5069562cdf9afbfd189bdf48d0b3c5cd3a3282a5b8a8ab0ded788a",
+    "sizeBytes": 101233344,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "物理キーボードのSpace／変換キーで、入力位置の近くへ縦の候補一覧を表示",
+      "Spaceの連続押し・矢印・Tabで候補を選び、Enterで確定",
+      "確定後のTabで「お願いします」などの続きの予測を選択し、Enterで末尾へ追加",
+      "画面キーボードを隠した状態でも候補一覧だけを表示し、Shift＋Tabで前の候補へ戻る操作に対応",
+      "日本語入力中の「?」「!」などを「？」「！」の全角記号へ変換",
+      "半角／全角キーで日英切り替え、キーが「`」として届く日本語配列の互換動作を追加",
+      "Backspaceを表示文字単位へ修正し、「KA→か」を削除したときに「k」が残る問題を解消",
+      "表示／非表示を同じショートカットで切り替え、設定画面の選択・キー入力から好きな組合せを登録可能に",
+      "英語モードのShift・Caps Lockによる大文字入力を維持",
+      "既存の設定・辞書・学習データと、アプリ内更新を維持"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 11,
     "versionName": "0.1.8",
     "releaseDate": "2026-11-01",
