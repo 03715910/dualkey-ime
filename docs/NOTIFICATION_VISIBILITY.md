@@ -15,3 +15,9 @@ Androidのバージョンやメーカーによって、このIME用キャプシ�
 候補表示には従来の高さ0のホストとIMEの子ウィンドウを使います。下部へ固定した入力欄で、物理変換中もバーが文字やタッチを覆わないことをテストします。PC風の縦候補は物理キー操作だけで開き、画面フリックと通常の候補一覧は変更しません。
 
 参考：[WindowInsetsController](https://developer.android.com/reference/android/view/WindowInsetsController)、[InputMethodService](https://developer.android.com/reference/android/inputmethodservice/InputMethodService)、[通知の権限](https://developer.android.com/develop/ui/views/notifications/notification-permission)。
+
+## 公開と確認
+
+[0.1.10のダウンロードサイト](https://03715910.github.io/dualkey-ime/)を公開しました。既存アプリの「更新」から確認して更新できます。最終インストールではAndroidの許可・確認を行ってください。
+
+API35の専用エミュレーターで入力・設定55項目、通知権限を拒否した場合の入力、横画面の下端入力欄を確認しました。縦横とも入力欄下端への実タッチが届き、通常表示では下部バーも復帰しました。Samsung実機は未確認です。詳細と途中の失敗・修正は[テスト結果](TEST_RESULTS.md)に記録しています。
