@@ -11,6 +11,8 @@ import android.view.*
 import android.view.inputmethod.*
 import android.widget.Toast
 import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
+import androidx.core.view.ViewCompat
 import io.github.dualkey.core.*
 import io.github.user03715910.dualkey.*
 import io.github.user03715910.dualkey.data.*
@@ -39,6 +41,9 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private val hardwarePanel by lazy { HardwareCandidatePanel(this,::commitCandidate) }
     private var hardwareCandidates=false
     private var candidateHostRequested=false
+    private var windowShown=false
+    private var displayEpoch=0L
+    private var displayRetry: Job?=null
     private var english = false
     private var shift = 0
     private var lastShift = 0L
@@ -71,6 +76,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         writer?.println("DualKey: requested=$hardwareCandidates, converting=$converting, continuation=$continuationCandidates, selected=$selected, choices=${candidates.size}")
         writer?.println("started=$inputStarted, sensitive=$sensitive, english=$english, predictions=$predictionsAllowed, mode=${visibility.mode}")
         writer?.println("attributeToken=${window?.window?.attributes?.token!=null}, decorToken=${window?.window?.decorView?.windowToken!=null}, panel=${hardwarePanel.status}")
+        if (Build.VERSION.SDK_INT>=30) writer?.println("captionVisible=${window?.window?.decorView?.rootWindowInsets?.isVisible(WindowInsets.Type.captionBar())}")
     }
 
     override fun onCreate() {
@@ -90,14 +96,14 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             refreshCandidates()
             applyVisibility(false)
         } }
-        scope.launch { ImeControl.requests.collect { mode -> if (mode != null) {
-            chooseDisplay(mode)
-            ImeControl.requests.value = null
-        } } }
+        scope.launch { ImeControl.requests.collect { request -> if (request!=null && hasEditor()) applyDisplayRequest(request) } }
     }
     override fun onCreateInputView(): View = KeyboardUi(this,::onScreenKey,::feedback).also { ui=it; it.dictionaryStatus(app.japaneseDictionary.message.value); rebuild(); refreshCandidates(); updateNavigationAppearance() }.root
-    override fun onWindowShown() { super.onWindowShown(); updateNavigationAppearance() }
-    override fun onWindowHidden() { hardwareCandidates=false; candidateHostRequested=false; hardwarePanel.dismiss(); super.onWindowHidden() }
+    override fun onWindowShown() {
+        super.onWindowShown(); windowShown=true; updateNavigationAppearance(); publishVisibility()
+        window?.window?.decorView?.post { updateCaptionVisibility() }
+    }
+    override fun onWindowHidden() { windowShown=false; hardwareCandidates=false; candidateHostRequested=false; hardwarePanel.dismiss(); publishVisibility(); super.onWindowHidden() }
     override fun onCreateCandidatesView(): View = object: View(this) {
         override fun onMeasure(widthMeasureSpec: Int,heightMeasureSpec: Int) {
             // InputMethodService supplies WRAP_CONTENT, so the host must explicitly measure to zero.
@@ -124,6 +130,40 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private fun updateNavigationAppearance() {
         window?.window?.let { w -> WindowCompat.getInsetsController(w,w.decorView).isAppearanceLightNavigationBars=
             resources.configuration.uiMode and Configuration.UI_MODE_NIGHT_MASK != Configuration.UI_MODE_NIGHT_YES }
+        updateCaptionVisibility()
+    }
+    private fun updateCaptionVisibility() {
+        if (Build.VERSION.SDK_INT<30) return
+        window?.window?.let { w ->
+            val controller=WindowCompat.getInsetsController(w,w.decorView)
+            if (settings.hideImeCaption && visibility.mode==DisplayMode.HIDDEN) controller.hide(WindowInsetsCompat.Type.captionBar())
+            else controller.show(WindowInsetsCompat.Type.captionBar())
+            ViewCompat.requestApplyInsets(w.decorView)
+        }
+    }
+    private fun publishVisibility() {
+        val active=hasEditor()
+        ImeControl.state.value=ImeControl.UiState(active,active && windowShown && isInputViewShown && visibility.mode!=DisplayMode.HIDDEN,visibility.mode)
+    }
+    private fun hasEditor() = inputStarted && currentInputConnection!=null && (currentInputEditorInfo?.inputType ?: InputType.TYPE_NULL)!=InputType.TYPE_NULL
+    private fun applyDisplayRequest(request: ImeControl.DisplayRequest) {
+        if (request.notification && !app.settings.state.value.visibilityNotification) {
+            ImeControl.requests.compareAndSet(request,null)
+            scope.launch { app.settings.clearNotificationDisplay(request.mode) }
+            return
+        }
+        chooseDisplay(request.mode)
+        val epoch=displayEpoch
+        ImeControl.requests.compareAndSet(request,null)
+        scope.launch { app.settings.awaitLoaded(); app.settings.clearNotificationDisplay(if (request.notification) request.mode else null) }
+        if (request.mode==DisplayMode.FULL) displayRetry=scope.launch {
+            // A notification shade may still be closing. Use bounded official show requests.
+            for (wait in listOf(180L,350L,650L)) {
+                delay(wait)
+                if (!hasEditor() || displayEpoch!=epoch || visibility.mode!=DisplayMode.FULL) break
+                applyVisibility(true)
+            }
+        }
     }
     override fun onEvaluateFullscreenMode() = false
     override fun onEvaluateInputViewShown(): Boolean {
@@ -155,6 +195,17 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             variation in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI))
         shift=0; symbols=false
         detectHardware(); rebuild(); refreshCandidates()
+        val initialRequest=if (hasEditor()) ImeControl.requests.value else null
+        initialRequest?.let(::applyDisplayRequest)
+        val startedSession=session; val startedCommand=displayEpoch
+        if (hasEditor() && initialRequest==null) scope.launch {
+            app.settings.awaitLoaded()
+            if (hasEditor() && session==startedSession && displayEpoch==startedCommand) {
+                val pending=app.settings.consumeNotificationDisplay()
+                if (pending!=null && hasEditor() && session==startedSession && displayEpoch==startedCommand) chooseDisplay(pending)
+            }
+        }
+        publishVisibility()
         if (!sensitive && predictionsAllowed) runCatching {
             val mode=InputConnection.CURSOR_UPDATE_IMMEDIATE or InputConnection.CURSOR_UPDATE_MONITOR
             if (Build.VERSION.SDK_INT>=33) currentInputConnection?.requestCursorUpdates(mode,InputConnection.CURSOR_UPDATE_FILTER_INSERTION_MARKER)
@@ -162,18 +213,18 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         }
         Handler(Looper.getMainLooper()).post { applyVisibility(false) }
     }
-    override fun onStartInputView(info: EditorInfo, restarting: Boolean) { super.onStartInputView(info,restarting); rebuild(); refreshCandidates() }
+    override fun onStartInputView(info: EditorInfo, restarting: Boolean) { super.onStartInputView(info,restarting); rebuild(); refreshCandidates(); publishVisibility() }
     override fun onFinishInput() {
         runCatching { currentInputConnection?.requestCursorUpdates(0) }
         commitComposition(); finishEnglish()
         currentInputConnection?.finishComposingText()
-        clearState(); inputStarted=false; ImeControl.inputActive=false; session++
+        clearState(); inputStarted=false; ImeControl.inputActive=false; session++; displayRetry?.cancel(); publishVisibility()
         super.onFinishInput()
     }
     override fun onDestroy() {
         hardwarePanel.dismiss()
         inputManager.unregisterInputDeviceListener(this)
-        translator.close(); scope.cancel(); ImeControl.inputActive=false
+        translator.close(); scope.cancel(); ImeControl.inputActive=false; inputStarted=false; windowShown=false; publishVisibility()
         super.onDestroy()
     }
     override fun onConfigurationChanged(newConfig: Configuration) { hardwarePanel.clearCursor(); super.onConfigurationChanged(newConfig); detectHardware(); rebuild(); applyVisibility(true); showHardwareCandidates() }
@@ -189,18 +240,21 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         visibility.connectionChanged(connected,remembered)
     }
     private fun chooseDisplay(mode: DisplayMode) {
+        displayEpoch++; displayRetry?.cancel()
         hardwareCandidates=false; closeHardwarePanel(true)
         visibility.manual=mode
         if (settings.rememberManual && visibility.connected) scope.launch { app.settings.set(Prefs.savedManual, mode.name) }
         rebuild(); applyVisibility(true)
     }
     private fun applyVisibility(request: Boolean) {
+        updateCaptionVisibility()
         setCandidatesViewShown(false)
         updateInputViewShown()
         if (visibility.mode == DisplayMode.HIDDEN) requestHideSelf(0)
         else if (request && inputStarted && currentInputConnection != null) {
             if (Build.VERSION.SDK_INT >= 28) requestShowSelf(0) else showLegacy()
         }
+        publishVisibility()
     }
     @Suppress("DEPRECATION")
     private fun showLegacy() { window?.window?.attributes?.token?.let { getSystemService(InputMethodManager::class.java).showSoftInputFromInputMethod(it,0) } }

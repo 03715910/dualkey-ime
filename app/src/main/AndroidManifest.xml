@@ -29,5 +29,6 @@
             android:authorities="${applicationId}.updates" android:exported="false" android:grantUriPermissions="true">
             <meta-data android:name="android.support.FILE_PROVIDER_PATHS" android:resource="@xml/update_paths" />
         </provider>
+        <receiver android:name=".ime.KeyboardVisibilityReceiver" android:exported="false" />
     </application>
 </manifest>

@@ -1,6 +1,10 @@
 package io.github.user03715910.dualkey
 
 import android.content.Intent
+import android.app.Notification
+import android.app.NotificationManager
+import android.Manifest
+import android.content.pm.PackageManager
 import android.graphics.Rect
 import android.os.SystemClock
 import android.os.ParcelFileDescriptor
@@ -16,6 +20,7 @@ import io.github.dualkey.core.DisplayMode
 import io.github.dualkey.core.ToggleShortcut
 import io.github.user03715910.dualkey.data.Prefs
 import io.github.user03715910.dualkey.settings.MainActivity
+import io.github.user03715910.dualkey.ime.KeyboardVisibilityNotification
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
@@ -50,6 +55,8 @@ class DeviceInputTest {
         return value
     }
     @Before fun openEditor() {
+        check(android.os.Build.MODEL.contains("sdk_gphone") || android.os.Build.FINGERPRINT.contains("generic"))
+        shell("cmd statusbar collapse")
         val component=android.content.ComponentName(instrumentation.targetContext.packageName,
             "io.github.user03715910.dualkey.ime.DualKeyService").flattenToShortString()
         // UTP reinstalls the app and can reset the default IME. Select the actual target, never Gboard.
@@ -62,6 +69,8 @@ class DeviceInputTest {
             withTimeout(30_000) { app.japaneseDictionary.engine.first { it is DictionaryConversionEngine } }
             withTimeout(30_000) { app.semanticDictionary.lexicon.first { it!=null } }
             app.settings.setDisplayShortcut(ToggleShortcut())
+            app.settings.set(Prefs.hideImeCaption,true); app.settings.set(Prefs.visibilityNotification,false)
+            app.settings.clearNotificationDisplay()
         }
         activity=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
         await("editor ready") { var found=false; main { found=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; found }
@@ -80,7 +89,7 @@ class DeviceInputTest {
         automation.serviceInfo=automation.serviceInfo.apply { flags=flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
         SystemClock.sleep(200)
     }
-    @After fun close() { if (::activity.isInitialized) main { activity.finish() } }
+    @After fun close() { shell("cmd statusbar collapse"); if (::activity.isInitialized) main { activity.finish() } }
     private fun key(code: Int,meta: Int=0,repeat: Int=0) {
         val now=SystemClock.uptimeMillis()
         instrumentation.sendKeySync(KeyEvent(now,now,KeyEvent.ACTION_DOWN,code,repeat,meta,KeyCharacterMap.VIRTUAL_KEYBOARD,0,0,InputDevice.SOURCE_KEYBOARD))
@@ -151,6 +160,161 @@ class DeviceInputTest {
         // Android can retain its IME navigation/caption bar, even with a zero-height input view.
         assertTrue("Only the OS navigation area remains",imeHeight()<=(48*activity.resources.displayMetrics.density).toInt())
         assertNull(findNode { it.contentDescription?.toString()?.startsWith("あ行。")==true })
+    }
+    private fun controlNotification(): Notification? = instrumentation.targetContext.getSystemService(NotificationManager::class.java)
+        .activeNotifications.firstOrNull { it.id==KeyboardVisibilityNotification.ID }?.notification
+    private fun enableControlNotification() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        if (android.os.Build.VERSION.SDK_INT>=33) assertEquals("Grant notification permission on the disposable emulator first",PackageManager.PERMISSION_GRANTED,app.checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS))
+        runBlocking { app.settings.set(Prefs.visibilityNotification,true); app.settings.state.first { it.visibilityNotification } }
+        KeyboardVisibilityNotification.refresh(app)
+        await("control notification posted") { controlNotification()!=null }
+    }
+    private fun bottomEditor() {
+        ImeControl.request(DisplayMode.HIDDEN); await("letter keys hidden") { imeHeight()==0 }
+        main {
+            val margin=(ViewCompat.getRootWindowInsets(activity.window.decorView)?.getInsets(WindowInsetsCompat.Type.systemBars())?.bottom ?: 0)+4
+            val overlay=android.widget.FrameLayout(activity)
+            editor=EditText(activity).apply {
+                setSingleLine(true); inputType=InputType.TYPE_CLASS_TEXT; hint="画面下端の入力欄"
+                setBackgroundColor(android.graphics.Color.WHITE)
+            }
+            overlay.addView(editor,android.widget.FrameLayout.LayoutParams(-1,(56*activity.resources.displayMetrics.density).toInt(),Gravity.BOTTOM).apply { bottomMargin=margin })
+            activity.addContentView(overlay,android.view.ViewGroup.LayoutParams(-1,-1)); editor.requestFocus()
+        }
+        instrumentation.waitForIdleSync()
+    }
+    @Test fun hiddenCaptionLeavesTheBottomEditorVisibleAndTouchableDuringHardwareConversion() {
+        bottomEditor(); letters("KYOU"); key(KeyEvent.KEYCODE_SPACE)
+        await("PC candidate above bottom editor") { hardwareNode("物理候補：今日")!=null }
+        await("no additional bottom keyboard bar") { imeHeight()==0 }
+        captureHardware("bottom-editor-without-bar")
+        var touched=false
+        val bounds=Rect()
+        main { editor.setOnTouchListener { _,event -> if (event.action==MotionEvent.ACTION_DOWN) touched=true; false }; editor.getGlobalVisibleRect(bounds) }
+        assertTrue(bounds.height()>40)
+        touch(Rect(bounds.left,bounds.bottom-16,bounds.right,bounds.bottom-4))
+        main { assertTrue("The IME must not eat taps at the bottom of the input field",touched) }
+    }
+    @Test fun captionSettingCanRestoreTheBarAndFullKeyboardRestoresItAutomatically() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.hideImeCaption,false); app.settings.state.first { !it.hideImeCaption } }
+        ImeControl.request(DisplayMode.HIDDEN); await("keyboard hidden") { imeHeight()==0 }
+        letters("KYOU"); key(KeyEvent.KEYCODE_SPACE)
+        await("optional OS caption present") { imeHeight()>0 }
+        runBlocking { app.settings.set(Prefs.hideImeCaption,true); app.settings.state.first { it.hideImeCaption } }
+        key(KeyEvent.KEYCODE_SPACE)
+        await("caption hidden again") { imeHeight()==0 && hardwareNode("物理キーボードの候補一覧")!=null }
+        ImeControl.request(DisplayMode.FULL); await("full keyboard restored") { imeHeight()>300 }
+        val command="dumpsys activity service ${app.packageName}/io.github.user03715910.dualkey.ime.DualKeyService"
+        var diagnostic=""
+        await("normal keyboard caption restored") {
+            diagnostic=ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(command)).use { String(it.readBytes()) }
+            "captionVisible=true" in diagnostic
+        }
+    }
+    @Test fun notificationActionTogglesTheSameEditorWithoutLosingItsComposingText() {
+        enableControlNotification(); letters("KA")
+        controlNotification()!!.actions.first().actionIntent.send()
+        await("notification hides keyboard") { imeHeight()==0 && ImeControl.state.value.mode==DisplayMode.HIDDEN }
+        assertEquals("か",inputText())
+        main { assertTrue(editor.hasFocus()); assertTrue(android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)>=0) }
+        letters("NA"); assertEquals("かな",inputText())
+        controlNotification()!!.actions.first().actionIntent.send()
+        await("same notification restores keyboard") { imeHeight()>300 }
+        assertEquals("かな",inputText())
+        captureHardware("notification-restored-keyboard")
+    }
+    @Test fun notificationShadeTapKeepsTheOriginalInputField() {
+        enableControlNotification(); letters("KA")
+        assertTrue(instrumentation.uiAutomation.performGlobalAction(android.accessibilityservice.AccessibilityService.GLOBAL_ACTION_NOTIFICATIONS))
+        var title: AccessibilityNodeInfo?=null
+        fun search(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+            if (node==null) return null
+            if (node.text?.toString()?.contains("キーボード表示切替")==true) return node
+            for (i in 0 until node.childCount) search(node.getChild(i))?.let { return it }
+            return null
+        }
+        try {
+            await("notification visible in shade") {
+                title=instrumentation.uiAutomation.windows.firstNotNullOfOrNull { search(it.root) }
+                title!=null
+            }
+        } catch (failure: AssertionError) {
+            captureHardware("notification-shade-lookup-failure")
+            val labels=mutableListOf<String>()
+            fun collect(node: AccessibilityNodeInfo?) {
+                if (node==null) return
+                node.text?.toString()?.let(labels::add); node.contentDescription?.toString()?.let(labels::add)
+                for (i in 0 until node.childCount) collect(node.getChild(i))
+            }
+            instrumentation.uiAutomation.windows.forEach { labels.add("windowType=${it.type}; root=${it.root!=null}"); collect(it.root) }
+            throw AssertionError(labels.joinToString(" | "),failure)
+        }
+        captureHardware("notification-shade")
+        touch(Rect().also { title!!.getBoundsInScreen(it) })
+        await("shade notification toggles") { ImeControl.state.value.mode==DisplayMode.HIDDEN }
+        shell("cmd statusbar collapse")
+        await("keyboard hidden after shade closes") { imeHeight()==0 }
+        await("original input window focused after shade closes") { activity.hasWindowFocus() && ImeControl.state.value.editorActive }
+        instrumentation.waitForIdleSync()
+        assertEquals("か",inputText()); main { assertTrue(editor.hasFocus()) }
+        letters("NA"); assertEquals("かな",inputText())
+    }
+    @Test fun deferredNotificationChoiceAppliesToTheNextEditorAndDoesNotOpenAnotherActivity() {
+        enableControlNotification()
+        main { activity.findViewById<View>(R.id.nav_settings).performClick() }
+        await("no editor focused") { !ImeControl.state.value.editorActive }
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        for (expected in listOf(DisplayMode.FULL,DisplayMode.HIDDEN,DisplayMode.FULL)) {
+            controlNotification()!!.actions.first().actionIntent.send()
+            await("deferred $expected") { app.settings.state.value.pendingNotificationDisplay==expected }
+        }
+        assertTrue(activity.hasWindowFocus())
+        // Emulate loss of the volatile request; the persisted choice must still be consumed.
+        ImeControl.requests.value=null
+        main { activity.findViewById<View>(R.id.nav_home).performClick() }
+        await("home editor") { var found=false; main { found=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; found }
+        main { editor=activity.findViewById<View>(android.R.id.content).findViewWithTag("test_input"); editor.requestFocus() }
+        await("deferred full mode") { ImeControl.state.value.editorActive && imeHeight()>300 }
+        await("deferred choice consumed") { app.settings.state.value.pendingNotificationDisplay==null }
+        letters("KA"); assertEquals("か",inputText())
+    }
+    @Test fun controlNotificationContainsNoInputAndCanBeDisabledIndependently() {
+        enableControlNotification(); letters("NIHONGO")
+        val notification=controlNotification()!!
+        assertFalse(notification.extras.getCharSequence(Notification.EXTRA_TEXT).toString().contains(inputText()))
+        val oldAction=notification.actions.first().actionIntent
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.visibilityNotification,false); app.settings.state.first { !it.visibilityNotification } }
+        await("control notice removed") { controlNotification()==null }
+        oldAction.send(); SystemClock.sleep(250)
+        assertTrue(imeHeight()>300); assertEquals("にほんご",inputText())
+    }
+    @Test fun disablingNotificationCancelsItsDeferredDisplayChoice() {
+        enableControlNotification()
+        ImeControl.request(DisplayMode.HIDDEN); await("manual hidden mode") { imeHeight()==0 && ImeControl.state.value.mode==DisplayMode.HIDDEN }
+        main { activity.findViewById<View>(R.id.nav_settings).performClick() }
+        await("settings without an editor") { !ImeControl.state.value.editorActive }
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        controlNotification()!!.actions.first().actionIntent.send()
+        await("queued show command") { app.settings.state.value.pendingNotificationDisplay==DisplayMode.FULL }
+        runBlocking { app.settings.set(Prefs.visibilityNotification,false); app.settings.state.first { !it.visibilityNotification } }
+        await("volatile notification command cancelled") { ImeControl.requests.value?.notification!=true }
+        main { activity.findViewById<View>(R.id.nav_home).performClick() }
+        await("home editor") { var found=false; main { found=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; found }
+        main { editor=activity.findViewById<View>(android.R.id.content).findViewWithTag("test_input"); editor.requestFocus() }
+        await("new editor remains hidden") { ImeControl.state.value.editorActive && imeHeight()==0 && ImeControl.state.value.mode==DisplayMode.HIDDEN }
+        await("persisted notification command cancelled") { app.settings.state.value.pendingNotificationDisplay==null }
+        letters("KA"); assertEquals("か",inputText())
+    }
+    @Test fun notificationPermissionDoesNotAffectOrdinaryInput() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.visibilityNotification,true); app.settings.state.first { it.visibilityNotification } }
+        KeyboardVisibilityNotification.refresh(app)
+        if (KeyboardVisibilityNotification.permitted(app)) await("allowed control notice") { controlNotification()!=null }
+        else assertNull(controlNotification())
+        letters("KYOU"); key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_ENTER); assertEquals("今日",inputText())
     }
     @Test fun physicalBackspaceDeletesDisplayedKanaAndUnfinishedRomaji() {
         letters("KA"); assertEquals("か",inputText()); key(KeyEvent.KEYCODE_DEL); assertEquals("",inputText())

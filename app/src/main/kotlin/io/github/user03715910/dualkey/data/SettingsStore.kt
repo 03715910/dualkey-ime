@@ -5,6 +5,7 @@ import androidx.datastore.preferences.core.*
 import androidx.datastore.preferences.preferencesDataStore
 import io.github.dualkey.core.HardwarePolicy
 import io.github.dualkey.core.ToggleShortcut
+import io.github.dualkey.core.DisplayMode
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.CompletableDeferred
 import kotlinx.coroutines.launch
@@ -40,6 +41,9 @@ object Prefs {
     val autoDownload = booleanPreferencesKey("auto_download")
     val wifiOnly = booleanPreferencesKey("wifi_only")
     val notifications = booleanPreferencesKey("notifications")
+    val visibilityNotification = booleanPreferencesKey("visibility_notification")
+    val hideImeCaption = booleanPreferencesKey("hide_ime_caption_when_hidden")
+    val pendingNotificationDisplay = stringPreferencesKey("pending_notification_display")
 }
 
 data class Settings(val p: Preferences = emptyPreferences()) {
@@ -67,6 +71,9 @@ data class Settings(val p: Preferences = emptyPreferences()) {
     val autoDownload get() = p[Prefs.autoDownload] ?: false
     val wifiOnly get() = p[Prefs.wifiOnly] ?: true
     val notifications get() = p[Prefs.notifications] ?: true
+    val visibilityNotification get() = p[Prefs.visibilityNotification] ?: true
+    val hideImeCaption get() = p[Prefs.hideImeCaption] ?: true
+    val pendingNotificationDisplay get() = runCatching { DisplayMode.valueOf(p[Prefs.pendingNotificationDisplay] ?: "") }.getOrNull()
     val dictionary: Map<String,List<String>> by lazy { runCatching {
         val json = JSONObject(p[Prefs.dictionary] ?: "{}")
         json.keys().asSequence().associateWith { key -> val a = json.getJSONArray(key); (0 until a.length()).map { a.getString(it) } }
@@ -88,6 +95,28 @@ class SettingsStore(private val context: Context, scope: CoroutineScope) {
     suspend fun setDisplayShortcut(value: ToggleShortcut) {
         require(value.valid)
         context.store.edit { it[Prefs.displayShortcutKey]=value.key; it[Prefs.displayShortcutModifiers]=value.modifiers }
+    }
+    suspend fun toggleNotificationDisplay(currentlyVisible: Boolean): DisplayMode? {
+        var target: DisplayMode?=null
+        context.store.edit {
+            if (it[Prefs.visibilityNotification]==false) return@edit
+            val pending=runCatching { DisplayMode.valueOf(it[Prefs.pendingNotificationDisplay] ?: "") }.getOrNull()
+            val visible=pending?.let { mode -> mode!=DisplayMode.HIDDEN } ?: currentlyVisible
+            target=if (visible) DisplayMode.HIDDEN else DisplayMode.FULL
+            it[Prefs.pendingNotificationDisplay]=target!!.name
+        }
+        return target
+    }
+    suspend fun clearNotificationDisplay(expected: DisplayMode?=null) {
+        context.store.edit { if (expected==null || it[Prefs.pendingNotificationDisplay]==expected.name) it.remove(Prefs.pendingNotificationDisplay) }
+    }
+    suspend fun consumeNotificationDisplay(): DisplayMode? {
+        var target: DisplayMode?=null
+        context.store.edit {
+            if (it[Prefs.visibilityNotification]!=false) target=runCatching { DisplayMode.valueOf(it[Prefs.pendingNotificationDisplay] ?: "") }.getOrNull()
+            it.remove(Prefs.pendingNotificationDisplay)
+        }
+        return target
     }
     suspend fun addWord(reading: String, word: String) {
         context.store.edit {

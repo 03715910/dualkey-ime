@@ -26,6 +26,7 @@ import io.github.dualkey.core.*
 import io.github.user03715910.dualkey.*
 import io.github.user03715910.dualkey.data.*
 import io.github.user03715910.dualkey.translation.TranslationEngine
+import io.github.user03715910.dualkey.ime.KeyboardVisibilityNotification
 import io.github.user03715910.dualkey.update.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -139,6 +140,7 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onResume() {
         super.onResume()
+        KeyboardVisibilityNotification.refresh(this)
         if (uiReady) { refreshKeyboardStatus(); resumeInstallationFlow(); maybeShowUpdatePrompt() }
     }
     override fun onPostResume() { super.onPostResume(); if (uiReady) resumeInstallationFlow() }
@@ -284,6 +286,18 @@ class MainActivity : AppCompatActivity() {
             selection("接続時の表示",listOf("自動で隠す","常に通常表示","省スペース表示","完全非表示"),s.policy.ordinal) { save(Prefs.hardwarePolicy,HardwarePolicy.entries[it].name) }
             toggle("手動で選んだ表示を次回も使う",Prefs.rememberManual,s.rememberManual)
             text("接続を解除すると通常表示に戻ります。完全非表示からは、ホームの表示ボタンで復帰できます。")
+            toggle("完全非表示時は下部バーも隠す",Prefs.hideImeCaption,s.hideImeCaption)
+            text("対応するAndroidでは、キーボード切替と下向き矢印のバーも隠します。通常表示へ戻すと復帰します。機種・OSによっては端末側の表示設定も必要です。")
+        }
+        section("通知から切り替え") {
+            toggle("表示切替の通知を使う",Prefs.visibilityNotification,s.visibilityNotification) { enabled ->
+                if (enabled) requestNotificationPermission()
+                else lifecycleScope.launch { app.settings.clearNotificationDisplay() }
+            }
+            text("通知の「表示／非表示を切替」を押すだけで切り替えます。別の画面を開かず、元の入力欄で続けられます。通知パネルが残る場合は閉じてください。入力欄がないときは、次にタップする入力欄で反映します。")
+            button("通知の許可・設定") { KeyboardVisibilityNotification.ensureChannel(this); requestNotificationPermission(true) }
+            if (!KeyboardVisibilityNotification.permitted(this)) text("表示切替の通知を使うには、Androidの通知を許可してください。")
+            text("この通知はアプリ更新の通知とは別にON／OFFできます。入力した文章は通知へ表示しません。")
         }
         section("ショートカット") {
             toggle("表示／非表示ショートカットを使う",Prefs.shortcut,s.shortcut)
@@ -556,7 +570,14 @@ class MainActivity : AppCompatActivity() {
             AlertDialog.Builder(this).setMessage("「${keys[i]}」の登録を削除しますか？").setPositiveButton("削除") { _,_ -> lifecycleScope.launch { app.settings.removeWord(keys[i]); selectPage(Page.CONVERSION) } }.setNegativeButton("戻る",null).show()
         }.setNegativeButton("閉じる",null).show()
     }
-    private fun requestNotificationPermission() {
+    override fun onRequestPermissionsResult(requestCode: Int,permissions: Array<out String>,grantResults: IntArray) {
+        super.onRequestPermissionsResult(requestCode,permissions,grantResults)
+        if (requestCode==301) {
+            KeyboardVisibilityNotification.refresh(this)
+            if (uiReady && page==Page.HARDWARE) selectPage(Page.HARDWARE)
+        }
+    }
+    private fun requestNotificationPermission(openSettingsIfGranted: Boolean=false) {
         if (Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) {
             if (getPreferences(MODE_PRIVATE).getBoolean("notification_requested",false) && !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {
                 openIntent(Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE,packageName))
@@ -564,7 +585,7 @@ class MainActivity : AppCompatActivity() {
                 getPreferences(MODE_PRIVATE).edit().putBoolean("notification_requested",true).apply()
                 requestPermissions(arrayOf(Manifest.permission.POST_NOTIFICATIONS),301)
             }
-        }
+        } else if (openSettingsIfGranted) openIntent(Intent(AndroidSettings.ACTION_APP_NOTIFICATION_SETTINGS).putExtra(AndroidSettings.EXTRA_APP_PACKAGE,packageName))
     }
     private fun openWebsite(fragment: String="") { if (BuildConfig.WEBSITE_URL.isNotBlank()) openIntent(Intent(Intent.ACTION_VIEW,Uri.parse(BuildConfig.WEBSITE_URL+fragment))) }
     private fun openIntent(intent: Intent) { try { startActivity(intent) } catch (_: ActivityNotFoundException) { toast("この端末では画面を開けません。Android設定から操作してください") } }
