@@ -41,6 +41,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     private var englishMode = false
     private var showNumbers=false
     private var showKeys=false
+    private var haptics=true
     private fun updateBody() {
         val translating=translationPanel.visibility==View.VISIBLE
         numberRow.visibility=if (showNumbers && !translating && !candidateExpanded) View.VISIBLE else View.GONE
@@ -90,6 +91,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     }
     private fun decorate(v: TextView) {
         v.setTextColor(ink); v.isFocusable = false; v.includeFontPadding=false
+        v.isHapticFeedbackEnabled=haptics
         v.setPadding(0,0,0,0)
         v.setAutoSizeTextTypeUniformWithConfiguration(12,if (v is FlickKey) 22 else 19,1,TypedValue.COMPLEX_UNIT_SP)
         val shape=GradientDrawable().apply { setColor(keyColor); cornerRadius = dp(7).toFloat() }
@@ -119,12 +121,12 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         isClickable = true
         setOnClickListener { feedback(this); callback(action) }
         if (action=="delete" || action=="paste") setOnLongClickListener {
-            performHapticFeedback(HapticFeedbackConstants.LONG_PRESS)
             callback(if (action=="delete") "delete_chunk" else "clipboard_history"); true
         }
     }
     fun rebuild(settings: Settings, english: Boolean, shift: Int, mode: DisplayMode, symbols: Boolean, sensitive: Boolean) {
         candidateExpanded=false
+        haptics=settings.vibration
         englishMode=english
         // Four key rows in either language. Give digits their own shorter height.
         val screen=context.resources.configuration
@@ -209,7 +211,10 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         previousCandidates=values
         candidateStrip.removeAllViews()
         candidateExpand.visibility=if (values.isEmpty()) View.GONE else View.VISIBLE
-        if (values.isEmpty()) candidateExpanded=false
+        if (values.isEmpty()) {
+            candidateExpanded=false
+            expandedScroll.submit(emptyList(),-1,ink,keyColor,{},false,false,{})
+        }
         candidateExpand.setOnClickListener {
             feedback(candidateExpand); candidateExpanded=!candidateExpanded
             expandedScroll.layoutParams.height=dp(if (context.resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) 128 else 200)

@@ -1,0 +1,11 @@
+<manifest xmlns:android="http://schemas.android.com/apk/res/android">
+    <application android:theme="@android:style/Theme.Material.Light.NoActionBar">
+        <!-- These components exist only in the test APK, never in the distributed IME. -->
+        <activity android:name="io.github.user03715910.dualkey.fixtures.LifecycleFixtureActivity"
+            android:exported="true" android:resizeableActivity="true" android:supportsPictureInPicture="true"
+            android:configChanges="orientation|screenSize|smallestScreenSize|screenLayout|keyboard|keyboardHidden|uiMode|density"
+            android:windowSoftInputMode="adjustResize" />
+        <receiver android:name="io.github.user03715910.dualkey.fixtures.LifecycleFixtureActivity$FinishReceiver"
+            android:exported="true" />
+    </application>
+</manifest>

@@ -81,7 +81,9 @@ class DeviceInputTest {
         await("focused activity") { activity.hasWindowFocus() }
         main {
             editor=activity.findViewById<View>(android.R.id.content).findViewWithTag("test_input")
+            editor.id=View.generateViewId()
             editor.setText(""); editor.requestFocus(); ImeControl.request(DisplayMode.FULL)
+            activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
             activity.getSystemService(InputMethodManager::class.java).showSoftInput(editor,0)
         }
         await("IME shown") {
@@ -91,10 +93,13 @@ class DeviceInputTest {
         }
         val automation=instrumentation.uiAutomation
         automation.serviceInfo=automation.serviceInfo.apply { flags=flags or android.accessibilityservice.AccessibilityServiceInfo.FLAG_RETRIEVE_INTERACTIVE_WINDOWS }
+        await("IME bound to this test editor") { "fieldId=${editor.id}\n" in diagnostic().replace("\r\n","\n") }
         SystemClock.sleep(200)
     }
     @After fun close() { shell("cmd statusbar collapse"); if (::activity.isInitialized) main { activity.finish() } }
     private fun key(code: Int,meta: Int=0,repeat: Int=0) {
+        // Programmatic setText/restartInput calls must settle before simulating the next user key.
+        instrumentation.waitForIdleSync()
         val now=SystemClock.uptimeMillis()
         instrumentation.sendKeySync(KeyEvent(now,now,KeyEvent.ACTION_DOWN,code,repeat,meta,KeyCharacterMap.VIRTUAL_KEYBOARD,0,0,InputDevice.SOURCE_KEYBOARD))
         instrumentation.sendKeySync(KeyEvent(now,now+10,KeyEvent.ACTION_UP,code,0,meta,KeyCharacterMap.VIRTUAL_KEYBOARD,0,0,InputDevice.SOURCE_KEYBOARD))
@@ -266,10 +271,13 @@ class DeviceInputTest {
             } finally { instrumentation.removeMonitor(monitor) }
             await("recreated editor") { var present=false; main { present=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; present }
             main {
-                editor=activity.findViewById<View>(android.R.id.content).findViewWithTag("test_input"); editor.requestFocus()
+                editor=activity.findViewById<View>(android.R.id.content).findViewWithTag("test_input"); editor.id=View.generateViewId(); editor.requestFocus()
+                activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
                 ImeControl.request(DisplayMode.FULL); activity.getSystemService(InputMethodManager::class.java).showSoftInput(editor,0)
             }
             await("recreated window focus") { activity.hasWindowFocus() && imeHeight()>300 }
+            await("recreated input connection") { "fieldId=${editor.id}\n" in diagnostic().replace("\r\n","\n") }
+            instrumentation.waitForIdleSync()
             touch(rect("k")); touch(rect("a")); assertEquals("か",inputText())
             val saved=app.settings.state.value
             assertEquals("ACTION",saved.screenEnter); assertEquals("NEWLINE",saved.physicalEnter); assertEquals(17,saved.clipboardLimit)
@@ -677,6 +685,9 @@ class DeviceInputTest {
         assertEquals(1,app.learning.state.value.entries.first { it.reading=="かんじ" && it.text=="漢字" }.count)
     }
     private fun gridCandidate(test: (String)->Boolean): AccessibilityNodeInfo? {
+        val list=findNode { it.contentDescription?.toString()=="変換候補の一覧" }
+        var back=0
+        while (back++<120 && list?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_BACKWARD)==true) SystemClock.sleep(100)
         repeat(120) {
             val item=findNode { it.isVisibleToUser && it.contentDescription?.toString()?.let(test)==true }
             if (item!=null) return item
@@ -694,8 +705,8 @@ class DeviceInputTest {
         assertNotNull("Scroll directly beyond sixty without any more button",item)
         assertNull(findNode { it.contentDescription?.toString()=="さらに候補を表示" })
         val word=item!!.contentDescription.toString().substringAfter('：')
-        assertTrue(item.performAction(AccessibilityNodeInfo.ACTION_CLICK)); await("61st choice committed") { inputText()==word }
         captureHardware("continuous-candidates")
+        assertTrue(item.performAction(AccessibilityNodeInfo.ACTION_CLICK)); await("61st choice committed") { inputText()==word }
     }
     @Test fun legacyCandidateLimitCanSearchForMore() {
         letters("KOU"); key(KeyEvent.KEYCODE_SPACE); touch(rect("一覧"))
@@ -824,16 +835,10 @@ class DeviceInputTest {
         letters("ISU"); key(KeyEvent.KEYCODE_SPACE)
         assertEquals("椅子",inputText())
         touch(rect("一覧"))
-        assertNotNull(findNode { it.text?.toString()=="イス" })
-        assertNotNull(findNode { it.text?.toString()=="チェア" })
-        assertNotNull(findNode { it.text?.toString()=="chair" })
-        repeat(15) {
-            if (findNode { it.text?.toString()=="chair" && it.isVisibleToUser }==null) {
-                findNode { it.className?.toString()=="android.widget.ScrollView" }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-                SystemClock.sleep(100)
-            }
-        }
-        clickLabel("chair"); assertEquals("chair",inputText())
+        assertNotNull(gridCandidate { it.substringAfter('：')=="イス" })
+        assertNotNull(gridCandidate { it.substringAfter('：')=="チェア" })
+        val chair=gridCandidate { it.substringAfter('：')=="chair" }
+        assertNotNull(chair); assertTrue(chair!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)); assertEquals("chair",inputText())
     }
     @Test fun scriptCycleUsesMeaningAndKeepsTheWholeSpanUncommitted() {
         letters("ISU")
@@ -944,7 +949,7 @@ class DeviceInputTest {
     }
     @Test fun passwordDisablesSuggestionsAndTranslation() {
         main { editor.inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; editor.setText(""); activity.getSystemService(InputMethodManager::class.java).restartInput(editor) }
-        await("password input mode ready") { findNode { it.text?.toString()=="EN" }!=null && findNode { it.text?.toString()=="翻訳" }==null }
+        await("password input mode ready") { "sensitive=true" in diagnostic() && findNode { it.contentDescription?.toString()=="日本語に切り替え" }!=null && findNode { it.text?.toString()=="翻訳" }==null }
         letters("secret"); assertEquals("secret",inputText())
         var composingStart=0; main { composingStart=android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text) }
         assertEquals(-1,composingStart)

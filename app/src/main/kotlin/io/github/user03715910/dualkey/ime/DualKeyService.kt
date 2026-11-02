@@ -44,6 +44,20 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var windowShown=false
     private var displayEpoch=0L
     private var displayRetry: Job?=null
+    // A display preference is not a request to open a window. The OS owns that request.
+    private var editorRequested=false
+    private var ownHidePending=false
+    private var ownHideSettlesAt=0L
+    private var changingConfiguration=false
+    private var updatingVisibility=false
+    private data class EditorKey(val packageName: String?,val fieldId: Int,val type: Int,val options: Int)
+    private var editorKey: EditorKey?=null
+    private data class RotationComposition(val editor: EditorKey,val text: String,val end: Int,val expires: Long)
+    private var rotationComposition: RotationComposition?=null
+    private var composingEnd: Int?=null
+    private var compositionRestoreJob: Job?=null
+    private val lifecycleStates=ArrayDeque<String>()
+    private fun lifecycleState(value: String) { lifecycleStates.addLast(value); while (lifecycleStates.size>8) lifecycleStates.removeFirst() }
     private var english = false
     private var shift = 0
     private var lastShift = 0L
@@ -84,6 +98,9 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         writer?.println("DualKey: requested=$hardwareCandidates, converting=$converting, continuation=$continuationCandidates, selected=$selected, choices=${candidates.size}")
         writer?.println("started=$inputStarted, sensitive=$sensitive, english=$english, predictions=$predictionsAllowed, mode=${visibility.mode}")
         writer?.println("action=${(currentInputEditorInfo?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION}")
+        writer?.println("fieldId=${currentInputEditorInfo?.fieldId}")
+        writer?.println("editor=${hasEditor()}, windowShown=$windowShown, editorRequested=$editorRequested, candidateHost=$candidateHostRequested")
+        writer?.println("lifecycle=${lifecycleStates.joinToString(" / ")}, ownHide=$ownHidePending")
         writer?.println("attributeToken=${window?.window?.attributes?.token!=null}, decorToken=${window?.window?.decorView?.windowToken!=null}, panel=${hardwarePanel.status}")
         if (Build.VERSION.SDK_INT>=30) writer?.println("captionVisible=${window?.window?.decorView?.rootWindowInsets?.isVisible(WindowInsets.Type.captionBar())}")
     }
@@ -112,10 +129,28 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     override fun onCreateInputView(): View = KeyboardUi(this,::onScreenKey,::feedback).also { ui=it; it.dictionaryStatus(app.japaneseDictionary.message.value); rebuild(); refreshCandidates(); updateNavigationAppearance() }.root
     override fun onWindowShown() {
-        super.onWindowShown(); windowShown=true; updateNavigationAppearance(); publishVisibility()
+        super.onWindowShown(); windowShown=true
+        lifecycleState("shown")
+        if (!hasEditor() || (visibility.mode==DisplayMode.HIDDEN && !candidateHostRequested)) { applyVisibility(false); return }
+        if (isInputViewShown) editorRequested=true
+        if (!ownHidePending && SystemClock.uptimeMillis()>=ownHideSettlesAt) displayRetry?.cancel()
+        updateNavigationAppearance(); publishVisibility()
         window?.window?.decorView?.post { updateCaptionVisibility() }
     }
-    override fun onWindowHidden() { windowShown=false; hardwareCandidates=false; candidateHostRequested=false; hardwarePanel.dismiss(); publishVisibility(); super.onWindowHidden() }
+    override fun onWindowHidden() {
+        val wasShown=windowShown
+        val own=ownHidePending || updatingVisibility
+        val expected=own || (!wasShown && SystemClock.uptimeMillis()<ownHideSettlesAt)
+        if (own && wasShown) ownHideSettlesAt=maxOf(ownHideSettlesAt,SystemClock.uptimeMillis()+350)
+        ownHidePending=false
+        lifecycleState("hidden(own=$expected)")
+        windowShown=false; hardwareCandidates=false; candidateHostRequested=false; hardwarePanel.dismiss()
+        if (!changingConfiguration && !expected) systemDismissed()
+        publishVisibility(); super.onWindowHidden()
+    }
+    private fun systemDismissed() {
+        editorRequested=false; displayEpoch++; displayRetry?.cancel()
+    }
     override fun onCreateCandidatesView(): View = object: View(this) {
         override fun onMeasure(widthMeasureSpec: Int,heightMeasureSpec: Int) {
             // InputMethodService supplies WRAP_CONTENT, so the host must explicitly measure to zero.
@@ -124,7 +159,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     override fun onComputeInsets(outInsets: InputMethodService.Insets) {
         super.onComputeInsets(outInsets)
-        if (visibility.mode==DisplayMode.HIDDEN) {
+        if (!hasEditor() || visibility.mode==DisplayMode.HIDDEN || (candidateHostRequested && !editorRequested)) {
             // The empty candidates host keeps the IME's subwindow available without reserving keyboard space.
             val height=window?.window?.decorView?.height ?: 0
             outInsets.contentTopInsets=height; outInsets.visibleTopInsets=height
@@ -148,7 +183,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         if (Build.VERSION.SDK_INT<30) return
         window?.window?.let { w ->
             val controller=WindowCompat.getInsetsController(w,w.decorView)
-            if (settings.hideImeCaption && visibility.mode==DisplayMode.HIDDEN) controller.hide(WindowInsetsCompat.Type.captionBar())
+            if (settings.hideImeCaption && (!hasEditor() || visibility.mode==DisplayMode.HIDDEN || (candidateHostRequested && !editorRequested))) controller.hide(WindowInsetsCompat.Type.captionBar())
             else controller.show(WindowInsetsCompat.Type.captionBar())
             ViewCompat.requestApplyInsets(w.decorView)
         }
@@ -157,7 +192,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val active=hasEditor()
         ImeControl.state.value=ImeControl.UiState(active,active && windowShown && isInputViewShown && visibility.mode!=DisplayMode.HIDDEN,visibility.mode)
     }
-    private fun hasEditor() = inputStarted && currentInputConnection!=null && (currentInputEditorInfo?.inputType ?: InputType.TYPE_NULL)!=InputType.TYPE_NULL
+    private fun hasEditor() = inputStarted && currentInputConnection!=null &&
+        (currentInputEditorInfo?.inputType ?: InputType.TYPE_NULL) and InputType.TYPE_MASK_CLASS != InputType.TYPE_NULL
     private fun applyDisplayRequest(request: ImeControl.DisplayRequest) {
         if (request.notification && !app.settings.state.value.visibilityNotification) {
             ImeControl.requests.compareAndSet(request,null)
@@ -171,16 +207,41 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     override fun onEvaluateFullscreenMode() = false
     override fun onEvaluateInputViewShown(): Boolean {
         super.onEvaluateInputViewShown()
-        // Explicit DualKey visibility must override the system hardware-keyboard default.
-        return visibility.mode != DisplayMode.HIDDEN
+        // This evaluates capability only; it must never open the IME window itself.
+        return hasEditor() && visibility.mode != DisplayMode.HIDDEN && !(candidateHostRequested && !editorRequested)
     }
     override fun onShowInputRequested(flags: Int, configChange: Boolean): Boolean {
-        return visibility.mode != DisplayMode.HIDDEN || candidateHostRequested
+        if (!hasEditor()) return false
+        if (configChange && !editorRequested && !candidateHostRequested) return false
+        // Remember a real editing request even when physical-keyboard policy hides the keys.
+        if (!configChange && !candidateHostRequested) editorRequested=true
+        return (visibility.mode != DisplayMode.HIDDEN && editorRequested) || candidateHostRequested
     }
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
+        val key=EditorKey(attribute.packageName,attribute.fieldId,attribute.inputType,attribute.imeOptions)
+        val owned=if (english) englishWord else displayedComposition()
+        val same=restarting && inputStarted && editorKey==key
+        val rotation=rotationComposition?.takeIf { same && it.editor==key && it.expires>=SystemClock.uptimeMillis() }
+        val before=if (same && !changingConfiguration && rotation==null && owned.isNotEmpty()) runCatching {
+            currentInputConnection?.getTextBeforeCursor(maxOf(owned.length,rotation?.text?.length ?: 0),0)?.toString()
+        }.getOrNull() else null
+        val preserve=restarting && inputStarted && editorKey==key &&
+            // The framework restarts the same connection during configuration changes.
+            // A synchronous client read can be temporarily empty while its layout is rebuilding.
+            (changingConfiguration || owned.isEmpty() || before?.endsWith(owned)==true || rotation!=null)
+        lifecycleState("start(restart=$restarting,config=$changingConfiguration,same=$same,preserve=$preserve,restore=${rotation!=null})")
+        val wanted=editorRequested && (preserve || windowShown)
+        displayEpoch++; displayRetry?.cancel()
         super.onStartInput(attribute,restarting)
-        session++; inputStarted=true; ImeControl.inputActive=true
-        clearState()
+        session++; inputStarted=attribute.inputType and InputType.TYPE_MASK_CLASS != InputType.TYPE_NULL
+        editorKey=if (inputStarted) key else null
+        if (!preserve) clearState() else invalidateTranslation()
+        if (preserve && !changingConfiguration && (owned.isNotEmpty() || rotation!=null)) {
+            val origin=rotation ?: composingEnd?.let { RotationComposition(key,owned,it,SystemClock.uptimeMillis()+2000) }
+            if (origin!=null) restoreComposition(origin,session)
+        }
+        editorRequested=inputStarted && wanted
+        ImeControl.inputActive=hasEditor()
         val type = attribute.inputType
         val klass = type and InputType.TYPE_MASK_CLASS
         val variation = type and InputType.TYPE_MASK_VARIATION
@@ -188,15 +249,17 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)) ||
             (klass == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
         numeric = klass == InputType.TYPE_CLASS_NUMBER || klass == InputType.TYPE_CLASS_PHONE || klass == InputType.TYPE_CLASS_DATETIME
-        predictionsAllowed = !sensitive && !numeric && type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0
+        predictionsAllowed = inputStarted && !sensitive && !numeric && type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0
         learningAllowed = predictionsAllowed && klass==InputType.TYPE_CLASS_TEXT &&
             attribute.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING==0 &&
             variation !in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI)
         contextAllowed=predictionsAllowed && klass==InputType.TYPE_CLASS_TEXT &&
             variation !in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI)
-        english = settings.initialEnglish || sensitive || numeric || (klass == InputType.TYPE_CLASS_TEXT &&
-            variation in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI))
-        shift=0; symbols=false
+        if (!preserve) {
+            english = settings.initialEnglish || sensitive || numeric || (klass == InputType.TYPE_CLASS_TEXT &&
+                variation in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI))
+            shift=0; symbols=false
+        }
         detectHardware(); rebuild(); refreshCandidates()
         val initialRequest=if (hasEditor()) ImeControl.requests.value else null
         initialRequest?.let(::applyDisplayRequest)
@@ -214,15 +277,28 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             if (Build.VERSION.SDK_INT>=33) currentInputConnection?.requestCursorUpdates(mode,InputConnection.CURSOR_UPDATE_FILTER_INSERTION_MARKER)
             else currentInputConnection?.requestCursorUpdates(mode)
         }
-        Handler(Looper.getMainLooper()).post { applyVisibility(false) }
+        Handler(Looper.getMainLooper()).post { if (session==startedSession) applyVisibility(false) }
     }
-    override fun onStartInputView(info: EditorInfo, restarting: Boolean) { super.onStartInputView(info,restarting); rebuild(); refreshCandidates(); publishVisibility() }
+    override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
+        super.onStartInputView(info,restarting)
+        if (hasEditor() && visibility.mode!=DisplayMode.HIDDEN) editorRequested=true
+        rebuild(); refreshCandidates(); publishVisibility()
+    }
     override fun onFinishInput() {
+        lifecycleState("finish")
         runCatching { currentInputConnection?.requestCursorUpdates(0) }
         commitComposition(); finishEnglish()
         currentInputConnection?.finishComposingText()
-        clearState(); inputStarted=false; ImeControl.inputActive=false; session++; displayRetry?.cancel(); publishVisibility()
+        clearState(); inputStarted=false; editorKey=null; editorRequested=false
+        ImeControl.inputActive=false; session++; displayEpoch++; displayRetry?.cancel(); publishVisibility()
         super.onFinishInput()
+    }
+    override fun onUnbindInput() {
+        lifecycleState("unbind")
+        // The old connection can outlive its client; never let a delayed show use it.
+        inputStarted=false; editorKey=null; editorRequested=false; ImeControl.inputActive=false
+        session++; displayEpoch++; displayRetry?.cancel(); clearState(); applyVisibility(false)
+        super.onUnbindInput()
     }
     override fun onDestroy() {
         clipboardManager.removePrimaryClipChangedListener(clipboardListener)
@@ -231,11 +307,31 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         translator.close(); scope.cancel(); ImeControl.inputActive=false; inputStarted=false; windowShown=false; publishVisibility()
         super.onDestroy()
     }
-    override fun onConfigurationChanged(newConfig: Configuration) { hardwarePanel.clearCursor(); super.onConfigurationChanged(newConfig); detectHardware(); rebuild(); applyVisibility(true); showHardwareCandidates() }
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        val owned=if (english) englishWord else displayedComposition()
+        val key=editorKey; val end=composingEnd
+        if (hasEditor() && !sensitive && owned.isNotEmpty() && key!=null && end!=null && end>=owned.length &&
+            (rotationComposition?.expires ?: 0)<SystemClock.uptimeMillis()) {
+            rotationComposition=RotationComposition(key,owned,end,SystemClock.uptimeMillis()+2000)
+        }
+        changingConfiguration=true
+        try {
+            hardwarePanel.clearCursor()
+            // The framework restores only the UI that the OS was actually showing.
+            super.onConfigurationChanged(newConfig)
+            detectHardware(); rebuild(); applyVisibility(false)
+            if (windowShown) showHardwareCandidates()
+        } finally { changingConfiguration=false }
+    }
     override fun onInputDeviceAdded(deviceId: Int) = hardwareChanged()
     override fun onInputDeviceRemoved(deviceId: Int) = hardwareChanged()
     override fun onInputDeviceChanged(deviceId: Int) = hardwareChanged()
-    private fun hardwareChanged() { detectHardware(); rebuild(); applyVisibility(true) }
+    private fun hardwareChanged() {
+        val connected=visibility.connected
+        detectHardware(); rebuild()
+        // Mouse/device updates are not text-entry requests. Resume only an ongoing editing session.
+        applyVisibility(connected && !visibility.connected && hasEditor() && editorRequested)
+    }
     private fun detectHardware() {
         val connected = inputManager.inputDeviceIds.any { id -> inputManager.getInputDevice(id)?.let {
             !it.isVirtual && it.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC && it.supportsSource(InputDevice.SOURCE_KEYBOARD)
@@ -247,16 +343,20 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         displayEpoch++; displayRetry?.cancel()
         hardwareCandidates=false; closeHardwarePanel(true)
         visibility.manual=mode
+        if (mode!=DisplayMode.HIDDEN && hasEditor()) editorRequested=true
         if (settings.rememberManual && visibility.connected) scope.launch { app.settings.set(Prefs.savedManual, mode.name) }
         rebuild(); applyVisibility(true)
-        if (mode==DisplayMode.FULL) {
-            val epoch=displayEpoch
+        if (mode==DisplayMode.FULL && hasEditor()) {
+            val epoch=displayEpoch; val editorSession=session
             displayRetry=scope.launch {
                 // A hide animation or notification shade may still be closing.
                 // Retry every manual show with official APIs; a newer command cancels this job.
                 for (wait in listOf(180L,350L,650L)) {
                     delay(wait)
-                    if (!hasEditor() || displayEpoch!=epoch || visibility.mode!=DisplayMode.FULL) break
+                    if (!hasEditor() || session!=editorSession || displayEpoch!=epoch || !editorRequested || visibility.mode!=DisplayMode.FULL) break
+                    if (ownHidePending) continue
+                    if (SystemClock.uptimeMillis()<ownHideSettlesAt) continue
+                    if (isInputViewShown && !ownHidePending) break
                     applyVisibility(true)
                 }
             }
@@ -266,11 +366,18 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         updateCaptionVisibility()
         // Settings writes can arrive after Space has opened the zero-height candidate host.
         // Keep that host until an explicit display change or the input session releases it.
-        val candidateHost=visibility.mode==DisplayMode.HIDDEN && candidateHostRequested
-        setCandidatesViewShown(candidateHost)
-        updateInputViewShown()
-        if (visibility.mode == DisplayMode.HIDDEN && !candidateHost) requestHideSelf(0)
-        else if (request && inputStarted && currentInputConnection != null) {
+        val active=hasEditor()
+        val candidateHost=active && candidateHostRequested && (visibility.mode==DisplayMode.HIDDEN || !editorRequested)
+        updatingVisibility=true
+        try { setCandidatesViewShown(candidateHost); updateInputViewShown() }
+        finally { updatingVisibility=false }
+        if (!active || (visibility.mode == DisplayMode.HIDDEN && !candidateHost)) {
+            if (!ownHidePending && (windowShown || isInputViewShown)) {
+                ownHidePending=true
+                ownHideSettlesAt=SystemClock.uptimeMillis()+350
+                requestHideSelf(0)
+            }
+        } else if (request && editorRequested && !ownHidePending && SystemClock.uptimeMillis()>=ownHideSettlesAt) {
             if (Build.VERSION.SDK_INT >= 28) requestShowSelf(0) else showLegacy()
         }
         publishVisibility()
@@ -288,6 +395,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun resetVariant() { variantJob?.cancel(); variantJob=null; variant=null }
     private fun clearState() {
+        compositionRestoreJob?.cancel(); compositionRestoreJob=null
+        rotationComposition=null; composingEnd=null
         hardwareCandidates=false; closeHardwarePanel(true); hardwarePanel.clearCursor()
         committedTail=null; continuationCandidates=false
         candidateJob?.cancel(); candidateQuery=null; candidateLoading=false; requestedReading=""; requestedLimit=0
@@ -337,7 +446,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                     } else emptyList(),settings.candidateCount)
             } else emptyList()
             setCandidateRecords(if (predictionsAllowed && english && settings.englishPrediction)
-                EnglishPrediction.candidates(englishWord,settings.candidateCount).map { Candidate(it,it.lowercase()) } else next)
+                EnglishPrediction.candidates(englishWord,10_000).map { Candidate(it,it.lowercase()) } else next)
         }
         showCandidates()
     }
@@ -372,11 +481,11 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         showHardwareCandidates()
     }
     private fun showHardwareCandidates() {
-        if (!hardwareCandidates || !inputStarted || sensitive || english || !predictionsAllowed ||
+        if (!hardwareCandidates || !hasEditor() || sensitive || english || !predictionsAllowed ||
             (!converting && !continuationCandidates) || selected !in candidates.indices) {
             closeHardwarePanel(); return
         }
-        if (visibility.mode==DisplayMode.HIDDEN && !candidateHostRequested) {
+        if ((visibility.mode==DisplayMode.HIDDEN || !editorRequested) && !candidateHostRequested) {
             candidateHostRequested=true
             setCandidatesViewShown(true)
             // A fresh official show request is also needed after a previous hide request.
@@ -402,7 +511,10 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         refreshCandidates()
     }
     private fun syncComposition() {
-        currentInputConnection?.setComposingText(displayedComposition(),1)
+        if (compositionRestoreJob?.isActive!=true) {
+            currentInputConnection?.setComposingText(displayedComposition(),1)
+            rememberComposingEnd()
+        }
         refreshCandidates()
     }
     private fun displayedComposition() = variant?.text ?: if (converting && selected in candidates.indices) candidates[selected] else composer.text
@@ -450,6 +562,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             CommittedTail(candidate,cursorPosition()) else null
     }
     private fun commitComposition(learn: Boolean=false) {
+        compositionRestoreJob?.cancel(); compositionRestoreJob=null
+        rotationComposition=null; composingEnd=null
         hardwareCandidates=false
         if (!composer.isEmpty) {
             val candidate=variant?.let { Candidate(it.text,it.reading) } ?:
@@ -463,7 +577,9 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         resetVariant(); composer.clear(); resetConversion(); refreshCandidates()
     }
     private fun commitCandidate(index: Int) {
-        if (index !in candidates.indices) return
+        if (!hasEditor() || index !in candidates.indices) return
+        compositionRestoreJob?.cancel(); compositionRestoreJob=null
+        rotationComposition=null; composingEnd=null
         hardwareCandidates=false
         if (continuationCandidates) {
             val tail=committedTail
@@ -488,22 +604,62 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         resetConversion(); refreshCandidates()
     }
     private fun type(value: String) {
+        if (!hasEditor()) return
         hardwareCandidates=false
         invalidateTranslation()
         if (sensitive || numeric) { currentInputConnection?.commitText(value,1); return }
         if (english) {
             if (value.all { it.isLetter() || it == '\'' } && predictionsAllowed && settings.englishPrediction) {
                 englishWord += value
-                currentInputConnection?.setComposingText(englishWord,1)
+                if (compositionRestoreJob?.isActive!=true) currentInputConnection?.setComposingText(englishWord,1)
             } else { finishEnglish(); currentInputConnection?.commitText(value,1) }
         } else {
             if (converting || variant!=null) commitComposition(true)
             committedTail?.let { if (composer.isEmpty && !validTail(it)) committedTail=null }
-            composer.append(value); resetConversion(); currentInputConnection?.setComposingText(composer.text,1)
+            composer.append(value); resetConversion()
+            if (compositionRestoreJob?.isActive!=true) currentInputConnection?.setComposingText(composer.text,1)
         }
+        if (compositionRestoreJob?.isActive!=true) rememberComposingEnd()
         refreshCandidates()
     }
-    private fun finishEnglish() { if (englishWord.isNotEmpty()) currentInputConnection?.commitText(englishWord,1); englishWord=""; refreshCandidates() }
+    private fun restoreComposition(origin: RotationComposition,editorSession: Long) {
+        compositionRestoreJob?.cancel()
+        compositionRestoreJob=scope.launch {
+            // The client's replacement connection may not yet accept commands inside onStartInput.
+            for (wait in listOf(16L,32L,64L,128L,256L,350L)) {
+                delay(wait)
+                if (session!=editorSession || !hasEditor() || editorKey!=origin.editor || sensitive) return@launch
+                if (SystemClock.uptimeMillis()>origin.expires) { clearState(); return@launch }
+                val connection=currentInputConnection ?: return@launch
+                val owned=if (english) englishWord else displayedComposition()
+                val end=cursorPosition() ?: continue
+                if (!connection.getSelectedText(0).isNullOrEmpty()) { clearState(); return@launch }
+                val before=connection.getTextBeforeCursor(origin.text.length+owned.length,0)?.toString() ?: continue
+                val start=origin.end-origin.text.length
+                val original=when {
+                    end==origin.end && before.endsWith(origin.text) -> origin.text
+                    owned.isNotEmpty() && end==start+owned.length && before.endsWith(owned) -> owned
+                    // A key may have reached the replacement client before its restart callback.
+                    // Both adjacent pieces must be our known unconfirmed text at the known cursor.
+                    owned.isNotEmpty() && end==origin.end+owned.length && before.endsWith(origin.text+owned) -> origin.text+owned
+                    else -> continue
+                }
+                connection.beginBatchEdit()
+                val restored=try {
+                    if (!connection.setComposingRegion(end-original.length,end)) false
+                    else if (owned!=original) connection.setComposingText(owned,1) else true
+                } finally { connection.endBatchEdit() }
+                if (restored) {
+                    composingEnd=end-original.length+owned.length; rotationComposition=null
+                    lifecycleState("composition-restored"); return@launch
+                }
+            }
+            // Unverifiable or unsupported clients must not receive old text on a later key.
+            if (session==editorSession) clearState()
+        }
+    }
+    private fun rememberComposingEnd() { composingEnd=if (!composer.isEmpty || englishWord.isNotEmpty()) cursorPosition() else null }
+    private fun finishEnglish() { if (englishWord.isNotEmpty()) { compositionRestoreJob?.cancel(); compositionRestoreJob=null; rotationComposition=null; composingEnd=null; currentInputConnection?.commitText(englishWord,1) }; englishWord=""; refreshCandidates() }
     private fun switchMode(toEnglish: Boolean = !english) {
         invalidateTranslation(); commitComposition(); committedTail=null; finishEnglish(); english=toEnglish; shift=0; resetConversion(); rebuild(); refreshCandidates()
     }
@@ -523,7 +679,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val variation=type and InputType.TYPE_MASK_VARIATION
         val multiline=type and InputType.TYPE_TEXT_FLAG_MULTI_LINE!=0
         val privateField=sensitive || numeric || variation in setOf(InputType.TYPE_TEXT_VARIATION_URI,InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS) ||
-            (!multiline && action in setOf(EditorInfo.IME_ACTION_SEARCH,EditorInfo.IME_ACTION_GO,EditorInfo.IME_ACTION_NEXT,EditorInfo.IME_ACTION_PREVIOUS,EditorInfo.IME_ACTION_DONE))
+            action in setOf(EditorInfo.IME_ACTION_SEARCH,EditorInfo.IME_ACTION_GO,EditorInfo.IME_ACTION_NEXT,EditorInfo.IME_ACTION_PREVIOUS) ||
+            (!multiline && action==EditorInfo.IME_ACTION_DONE)
         if (physical && shiftPressed && !privateField) {
             if (!composer.isEmpty) commitComposition(true)
             finishEnglish(); committedTail=null; resetConversion(); currentInputConnection?.commitText("\n",1); refreshCandidates(); return
@@ -643,6 +800,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         }
     }
     private fun onScreenKey(key: String) {
+        if (!hasEditor() && key !in setOf("full","compact","hide","settings")) return
         if (key=="more_candidates") { moreCandidates(); return }
         if (key!="shift") lastShift=0
         hardwareCandidates=false; hardwarePanel.dismiss()
@@ -676,6 +834,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         }
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
+        if (!hasEditor()) return super.onKeyDown(keyCode,event)
         var handled=true
         when {
             settings.shortcut && settings.displayShortcut.matches(HardwareShortcuts.key(keyCode),HardwareShortcuts.modifiers(event)) -> {
@@ -733,6 +892,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         super.onUpdateSelection(oldSelStart,oldSelEnd,newSelStart,newSelEnd,candidatesStart,candidatesEnd)
         val ownsComposition=!composer.isEmpty || englishWord.isNotEmpty()
         val moved=oldSelStart!=newSelStart || oldSelEnd!=newSelEnd
+        if (ownsComposition && compositionRestoreJob?.isActive==true && candidatesEnd<0 &&
+            newSelStart==newSelEnd && newSelEnd==rotationComposition?.end) return
         // Delayed composing-end notifications are normal; cancel only when the cursor leaves
         // that span, or an explicitly selected source changes.
         if (ownsComposition && ((candidatesEnd>=0 && (newSelStart!=candidatesEnd || newSelEnd!=candidatesEnd)) || (candidatesEnd<0 && moved))) {
@@ -740,6 +901,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             // already begun a new composing span. Do not commit that new romaji as
             // a literal because of an obsolete cursor report.
             if (selectionReportIsStale(newSelStart,newSelEnd)) return
+            lifecycleState("cursor-reset")
             currentInputConnection?.finishComposingText(); clearState()
         } else if (!ownsComposition && moved) {
             if (translationJob!=null) invalidateTranslation()
@@ -787,7 +949,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 if (session!=sessionId || revision!=sourceRevision || sensitive) return@launch
                 ui?.showTranslation("Google翻訳（端末内）\n$result\n翻訳には誤りが含まれる場合があります。",listOf("この訳を入力" to {
                     if (session==sessionId && revision==sourceRevision && !sensitive && (!fromSelection || currentInputConnection?.getSelectedText(0)?.toString()==source)) {
-                        currentInputConnection?.commitText(result,1); resetVariant(); composer.clear(); englishWord=""; resetConversion(); refreshCandidates(); invalidateTranslation()
+                        compositionRestoreJob?.cancel(); compositionRestoreJob=null; currentInputConnection?.commitText(result,1); rotationComposition=null; composingEnd=null; resetVariant(); composer.clear(); englishWord=""; resetConversion(); refreshCandidates(); invalidateTranslation()
                     } else { invalidateTranslation(); Toast.makeText(this@DualKeyService,"入力先が変わりました。翻訳し直してください。",Toast.LENGTH_SHORT).show() }
                 }, "キャンセル" to { invalidateTranslation() }), attribution=true)
             } catch (e: CancellationException) { throw e }

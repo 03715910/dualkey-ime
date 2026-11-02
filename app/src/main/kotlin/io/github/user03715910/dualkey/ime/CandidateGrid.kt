@@ -9,7 +9,7 @@ import androidx.recyclerview.widget.RecyclerView
 import kotlin.math.ceil
 
 /** Virtualized cells: candidate count does not multiply Android View instances. */
-class CandidateGrid(context: Context): RecyclerView(context) {
+class CandidateGrid @JvmOverloads constructor(context: Context,attrs: android.util.AttributeSet?=null): RecyclerView(context,attrs) {
     private var values=emptyList<String>()
     private var selected=-1
     private var select: (Int)->Unit={}

@@ -347,7 +347,7 @@ class MainActivity : AppCompatActivity() {
             toggle("日本語の予測候補",Prefs.japanesePrediction,s.japanesePrediction)
             toggle("英語の予測候補",Prefs.englishPrediction,s.englishPrediction)
             slider("最初に検索する候補数",Prefs.candidateCount,maxOf(64,s.candidateCount),64,1000)
-            text("最初の検索は最低64件です。「一覧」を開くと続きを背景で検索し、ボタンなしの連続スクロールで閲覧できます。表示するセルだけを描画し、計算量保護の上限は10,000件です。")
+            text("最初の候補は64件以上です。「一覧」はスクロールで続きを自動追加します。検索できる候補は最大10,000件です。")
         }
         section("変換の学習") {
             toggle("よく使う日本語の変換を学習",Prefs.learningEnabled,s.learningEnabled)
@@ -580,7 +580,8 @@ class MainActivity : AppCompatActivity() {
         val reading=EditText(this).apply { hint="よみ（ひらがな）" }; val word=EditText(this).apply { hint="単語" }
         reading.setText(oldReading.orEmpty()); word.setText(oldWord.orEmpty())
         box.addView(reading); box.addView(word)
-        val dialog=AlertDialog.Builder(this).setTitle("ユーザー辞書に追加").setView(box).setPositiveButton("追加",null).setNegativeButton("キャンセル",null).create()
+        val dialog=AlertDialog.Builder(this).setTitle(if (oldReading==null) "ユーザー辞書に追加" else "ユーザー辞書を編集").setView(box)
+            .setPositiveButton(if (oldReading==null) "追加" else "保存",null).setNegativeButton("キャンセル",null).create()
         dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val r=reading.text.toString().trim(); val w=word.text.toString().trim()
             if (!r.matches(Regex("[ぁ-ゖー]{1,50}")) || w.isEmpty() || w.length>100) { toast("よみはひらがな50文字以内、単語は100文字以内で入力してください"); return@setOnClickListener }

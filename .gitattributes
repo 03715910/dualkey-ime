@@ -1,0 +1,2 @@
+# Pinned source bytes must remain identical on Windows and CI.
+app/src/main/assets/symbols/* text eol=lf
