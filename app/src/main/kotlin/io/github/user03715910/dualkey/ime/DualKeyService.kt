@@ -153,17 +153,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             return
         }
         chooseDisplay(request.mode)
-        val epoch=displayEpoch
         ImeControl.requests.compareAndSet(request,null)
         scope.launch { app.settings.awaitLoaded(); app.settings.clearNotificationDisplay(if (request.notification) request.mode else null) }
-        if (request.mode==DisplayMode.FULL) displayRetry=scope.launch {
-            // A notification shade may still be closing. Use bounded official show requests.
-            for (wait in listOf(180L,350L,650L)) {
-                delay(wait)
-                if (!hasEditor() || displayEpoch!=epoch || visibility.mode!=DisplayMode.FULL) break
-                applyVisibility(true)
-            }
-        }
     }
     override fun onEvaluateFullscreenMode() = false
     override fun onEvaluateInputViewShown(): Boolean {
@@ -245,6 +236,18 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         visibility.manual=mode
         if (settings.rememberManual && visibility.connected) scope.launch { app.settings.set(Prefs.savedManual, mode.name) }
         rebuild(); applyVisibility(true)
+        if (mode==DisplayMode.FULL) {
+            val epoch=displayEpoch
+            displayRetry=scope.launch {
+                // A hide animation or notification shade may still be closing.
+                // Retry every manual show with official APIs; a newer command cancels this job.
+                for (wait in listOf(180L,350L,650L)) {
+                    delay(wait)
+                    if (!hasEditor() || displayEpoch!=epoch || visibility.mode!=DisplayMode.FULL) break
+                    applyVisibility(true)
+                }
+            }
+        }
     }
     private fun applyVisibility(request: Boolean) {
         updateCaptionVisibility()
