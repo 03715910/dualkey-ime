@@ -36,6 +36,7 @@ class LearningStore(context: Context,private val scope: CoroutineScope,databaseN
     private val status=MutableStateFlow("学習データを準備しています…")
     val message=status.asStateFlow()
     @Volatile private var epoch=0L
+    val generation get()=epoch
 
     init {
         scope.launch(Dispatchers.IO) {
@@ -62,10 +63,10 @@ class LearningStore(context: Context,private val scope: CoroutineScope,databaseN
     suspend fun awaitLoaded() { loaded.await() }
     fun close() { db.close() }
 
-    fun record(reading: String,text: String) {
+    fun record(reading: String,text: String,expectedGeneration: Long=epoch) {
         val key=Personalization.normalize(reading)
-        if (!enabled() || !Personalization.valid(key,text)) return
-        val capturedEpoch=epoch
+        if (expectedGeneration!=epoch || !enabled() || !Personalization.valid(key,text)) return
+        val capturedEpoch=expectedGeneration
         scope.launch(Dispatchers.IO) {
             awaitLoaded()
             mutex.withLock {
@@ -89,10 +90,10 @@ class LearningStore(context: Context,private val scope: CoroutineScope,databaseN
         }
     }
 
-    fun recordContinuation(context: String,reading: String,text: String) {
+    fun recordContinuation(context: String,reading: String,text: String,expectedGeneration: Long=epoch) {
         val key=Personalization.normalize(reading)
-        if (!enabled() || !NextWordPrediction.valid(LearnedContinuation(context,text,key,1,0))) return
-        val capturedEpoch=epoch
+        if (expectedGeneration!=epoch || !enabled() || !NextWordPrediction.valid(LearnedContinuation(context,text,key,1,0))) return
+        val capturedEpoch=expectedGeneration
         scope.launch(Dispatchers.IO) {
             awaitLoaded()
             mutex.withLock {

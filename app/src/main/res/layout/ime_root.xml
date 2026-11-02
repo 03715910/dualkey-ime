@@ -9,9 +9,7 @@
     <ImageView android:id="@+id/composition_attribution" android:layout_width="132dp" android:layout_height="24dp" android:layout_gravity="center_vertical" android:layout_marginEnd="4dp" android:src="@drawable/google_translate_attribution" android:scaleType="fitCenter" android:background="#FFFFFF" android:contentDescription="powered by Google Translate" android:visibility="gone" />
     <TextView android:id="@+id/candidate_expand" android:layout_width="48dp" android:layout_height="match_parent" android:gravity="center" android:text="一覧" android:textSize="13sp" android:contentDescription="変換候補を一覧表示" android:visibility="gone" />
     </LinearLayout>
-    <ScrollView android:id="@+id/candidate_expanded_scroll" android:layout_width="match_parent" android:layout_height="200dp" android:visibility="gone">
-        <LinearLayout android:id="@+id/candidate_expanded" android:layout_width="match_parent" android:layout_height="wrap_content" android:orientation="vertical" />
-    </ScrollView>
+    <io.github.user03715910.dualkey.ime.CandidateGrid android:id="@+id/candidate_expanded_scroll" android:layout_width="match_parent" android:layout_height="200dp" android:visibility="gone" />
     <LinearLayout android:id="@+id/number_row" android:orientation="horizontal" android:layout_width="match_parent" android:layout_height="wrap_content" />
     <LinearLayout android:id="@+id/key_area" android:orientation="vertical" android:layout_width="match_parent" android:layout_height="wrap_content" />
     <LinearLayout android:id="@+id/translation_panel" android:orientation="vertical" android:visibility="gone" android:layout_width="match_parent" android:layout_height="wrap_content" />

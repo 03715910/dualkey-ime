@@ -53,7 +53,7 @@ class LocalConversionEngine(private val user: () -> Map<String, List<String>> = 
         if (prediction) dict.filterKeys { it.startsWith(reading) && it != reading }.values.forEach { results += it }
         results += reading
         results += reading.map { if (it in 'ぁ'..'ゖ') it + 0x60 else it }.joinToString("")
-        return results.distinct().take(limit.coerceIn(2,30)).map { Candidate(it, reading) }
+        return results.distinct().take(limit.coerceIn(2,10000)).map { Candidate(it, reading) }
     }
 }
 

@@ -3,7 +3,7 @@ Copyright 2026 DualKey IME contributors
 Project source license: Apache License 2.0 (see repository LICENSE).
 
 Kotlin standard library / kotlinx.coroutines: Apache License 2.0
-AndroidX Core, AppCompat, Lifecycle, DataStore, WorkManager: Apache License 2.0
+AndroidX Core, AppCompat, RecyclerView, Lifecycle, DataStore, WorkManager: Apache License 2.0
 Android APK Signature Scheme verification library (apksig): Apache License 2.0
 https://source.android.com/docs/setup/about/licenses
 https://www.apache.org/licenses/LICENSE-2.0
@@ -41,3 +41,5 @@ Copyright James William BREEN and the Electronic Dictionary Research and Develop
 The original and derived dictionary data are CC BY-SA 4.0. See semantic/LICENSE-JMDICT.txt,
 semantic/EDRDG-LICENCE.html and semantic/JMdict-documentation.html for attribution and modifications.
 https://www.edrdg.org/edrdg/licence.html
+
+Symbol readings derive from google/mozc src/data/symbol/symbol.tsv at the same pinned revision (BSD-3-Clause). See symbols/LICENSE and symbols/manifest.json. U+FF5E variants are generated for U+301C entries.

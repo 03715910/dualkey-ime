@@ -71,6 +71,10 @@ class DeviceInputTest {
             app.settings.setDisplayShortcut(ToggleShortcut())
             app.settings.set(Prefs.hideImeCaption,true); app.settings.set(Prefs.visibilityNotification,false)
             app.settings.clearNotificationDisplay()
+            app.settings.set(Prefs.japaneseLayout,"FLICK"); app.settings.set(Prefs.englishLayout,"QWERTY")
+            app.settings.set(Prefs.screenEnter,"SMART_NEWLINE"); app.settings.set(Prefs.physicalEnter,"SMART_SEND")
+            app.settings.set(Prefs.clipboardHistory,false)
+            withTimeout(10_000) { app.symbols.entries.first { it.isNotEmpty() } }
         }
         activity=instrumentation.startActivitySync(Intent(instrumentation.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
         await("editor ready") { var found=false; main { found=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; found }
@@ -97,6 +101,181 @@ class DeviceInputTest {
         instrumentation.waitForIdleSync()
     }
     private fun letters(text: String) { text.forEach { key(KeyEvent.KEYCODE_A+(it.lowercaseChar()-'a')) } }
+    private fun diagnostic(): String = ParcelFileDescriptor.AutoCloseInputStream(instrumentation.uiAutomation.executeShellCommand(
+        "dumpsys activity service ${instrumentation.targetContext.packageName}/io.github.user03715910.dualkey.ime.DualKeyService")).use { String(it.readBytes()) }
+    private fun hold(bounds: Rect) {
+        val now=SystemClock.uptimeMillis()
+        fun inject(action: Int) { val e=MotionEvent.obtain(now,SystemClock.uptimeMillis(),action,bounds.exactCenterX(),bounds.exactCenterY(),0).apply { source=InputDevice.SOURCE_TOUCHSCREEN }; instrumentation.uiAutomation.injectInputEvent(e,true); e.recycle() }
+        inject(MotionEvent.ACTION_DOWN); SystemClock.sleep(ViewConfiguration.getLongPressTimeout()+150L); inject(MotionEvent.ACTION_UP); instrumentation.waitForIdleSync()
+    }
+    private fun copy(text: String,sensitive: Boolean=false) = main {
+        val clip=android.content.ClipData.newPlainText("DualKey test",text)
+        if (sensitive) clip.description.extras=android.os.PersistableBundle().apply { putBoolean("android.content.extra.IS_SENSITIVE",true) }
+        activity.getSystemService(android.content.ClipboardManager::class.java).setPrimaryClip(clip)
+    }
+    @Test fun generalSymbolReadingsIncludeMusicAndBothWaveCharacters() {
+        letters("ONPU"); key(KeyEvent.KEYCODE_SPACE); touch(rect("一覧"))
+        assertNotNull(gridCandidate { it.substringAfter('：')=="♪" })
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        val values=app.symbols.entries.value["おんぷ"].orEmpty()
+        assertTrue(values.containsAll(listOf("♪","♫","♬")))
+        for (reading in listOf("から","ー")) assertTrue(app.symbols.entries.value[reading].orEmpty().containsAll(listOf("〜","～")))
+        captureHardware("music-symbol-candidates")
+    }
+    @Test fun waveCandidatesCanBeChosenForKaraAndLongVowelMark() {
+        letters("KARA"); key(KeyEvent.KEYCODE_SPACE); touch(rect("一覧"))
+        val wave=gridCandidate { it.substringAfter('：')=="～" }
+        assertNotNull(wave); assertTrue(wave!!.performAction(AccessibilityNodeInfo.ACTION_CLICK)); await("wave committed") { inputText()=="～" }
+        key(KeyEvent.KEYCODE_MINUS); key(KeyEvent.KEYCODE_SPACE); touch(rect("一覧"))
+        assertNotNull(gridCandidate { it.substringAfter('：')=="～" })
+    }
+    @Test fun symbolPanelProvidesTwoDistinctUnicodeWaves() {
+        touch(rect("記号")); touch(rect("～")); touch(rect("↵"))
+        touch(rect("〜")); touch(rect("↵")); assertEquals("～〜",inputText())
+    }
+    @Test fun japaneseQwertyAndEnglishFlickUseIndependentSavedLayouts() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.japaneseLayout,"QWERTY"); app.settings.set(Prefs.englishLayout,"FLICK"); app.settings.state.first { it.japaneseQwerty && it.englishFlick } }
+        touch(rect("k")); touch(rect("y")); touch(rect("o")); assertEquals("きょ",inputText()); touch(rect("↵"))
+        touch(rect("英語に切り替え")); val a=rect("a行"); touch(a,dx=-(a.width()*0.7).toInt()); assertEquals("きょb",inputText())
+        key(KeyEvent.KEYCODE_ZENKAKU_HANKAKU); letters("NIHONGO"); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("きょbにほんご",inputText())
+        captureHardware("japanese-qwerty")
+    }
+    @Test fun shiftCanCancelAnUnusedSingleCapitalAndShowsThreeStates() {
+        touch(rect("英語に切り替え")); touch(rect("Shift：小文字"))
+        assertNotNull(findNode { it.contentDescription?.toString()=="Shift：次の1文字を大文字" })
+        SystemClock.sleep(ViewConfiguration.getDoubleTapTimeout()+80L); touch(rect("Shift：次の1文字を大文字"))
+        assertNotNull(findNode { it.contentDescription?.toString()=="Shift：小文字" })
+        touch(rect("a")); assertEquals("a",inputText())
+        touch(rect("Shift：小文字")); touch(rect("A")); touch(rect("b")); assertEquals("aAb",inputText())
+        assertNotNull(findNode { it.contentDescription?.toString()=="Shift：小文字" })
+    }
+    @Test fun deleteLongPressClearsOwnedCompositionWithoutAnExtraTapDelete() {
+        main { editor.setText("前。"); editor.setSelection(editor.length()) }
+        letters("KANA"); assertEquals("前。かな",inputText())
+        hold(rect("⌫")); await("composition deleted once") { inputText()=="前。" }
+        touch(rect("⌫")); assertEquals("前",inputText())
+    }
+    @Test fun deleteLongPressHonorsCursorClausesAndSelection() {
+        main { editor.setText("あ。い、うえ。後ろ"); editor.setSelection(7) }
+        hold(rect("⌫")); assertEquals("あ。い、後ろ",inputText())
+        main { editor.setSelection(0,2) }; hold(rect("⌫")); assertEquals("い、後ろ",inputText())
+    }
+    @Test fun pasteWorksWithHistoryOffAndToolbarHasNoDuplicateModeButton() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        copy("貼り付け試験"); touch(rect("貼り付け")); assertEquals("貼り付け試験",inputText())
+        assertFalse(app.settings.state.value.clipboardHistory); assertTrue(app.clipboard.current().isEmpty())
+        assertNull(findNode { it.text?.toString()=="日本語" })
+        hold(rect("貼り付け")); assertEquals("貼り付け試験",inputText())
+        assertNotNull(findNode { it.text?.toString()?.startsWith("履歴保存はOFF")==true })
+    }
+    @Test fun clipboardHistorySupportsPickingIndividualDeletionAndClearing() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        copy("一つ目の文章"); await("first clip") { app.clipboard.current().any { it.text=="一つ目の文章" } }
+        copy("二つ目の文章"); await("second clip") { app.clipboard.current().size==2 }
+        hold(rect("貼り付け")); assertEquals("",inputText())
+        clickLabel("履歴 2：一つ目の文章"); assertEquals("一つ目の文章",inputText())
+        hold(rect("貼り付け")); clickLabel("履歴 2を削除"); await("one clip remains") { app.clipboard.current().size==1 }
+        clickLabel("全削除"); clickLabel("削除する"); await("all clips deleted") { app.clipboard.current().isEmpty() }
+        clickLabel("閉じる"); hold(rect("貼り付け")); assertTrue("Opening history must not resurrect the system's current clip",app.clipboard.current().isEmpty())
+        captureHardware("clipboard-history")
+    }
+    @Test fun markedSensitiveClipIsNotRetainedAndDisablingErasesHistory() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        copy("保存できる普通の文章"); await("ordinary clip saved") { app.clipboard.current().size==1 }
+        copy("機密の短文",true); SystemClock.sleep(250); assertFalse(app.clipboard.current().any { it.text=="機密の短文" })
+        touch(rect("貼り付け")); assertEquals("機密の短文",inputText())
+        runBlocking { app.settings.set(Prefs.clipboardHistory,false); app.settings.state.first { !it.clipboardHistory } }
+        await("history file erased") { app.clipboard.state.value.isEmpty() && !java.io.File(app.noBackupFilesDir,"clipboard-history.json").exists() }
+    }
+    @Test fun passwordFieldsDoNotCaptureOrShowClipboardHistory() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        main { editor.inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; activity.getSystemService(InputMethodManager::class.java).restartInput(editor) }
+        await("password EditorInfo") { "sensitive=true" in diagnostic() }
+        copy("保存してはいけない文章"); SystemClock.sleep(250); assertTrue(app.clipboard.current().isEmpty())
+        hold(rect("貼り付け")); assertNull(findNode { it.text?.toString()?.startsWith("クリップボード履歴・")==true })
+    }
+    @Test fun screenEnterNewlinesPhysicalEnterSendsAndShiftEnterNewlines() {
+        var sends=0
+        main {
+            editor.inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE
+            editor.imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_SEND
+            editor.setOnEditorActionListener { _,action,_ -> if (action==android.view.inputmethod.EditorInfo.IME_ACTION_SEND) { sends++; true } else false }
+            editor.setText("本文"); editor.setSelection(editor.length()); activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
+        }
+        await("SEND EditorInfo") { "action=4" in diagnostic() }
+        touch(rect("↵")); assertEquals("本文\n",inputText()); main { assertEquals(0,sends) }
+        key(KeyEvent.KEYCODE_ENTER); main { assertEquals(1,sends) }
+        key(KeyEvent.KEYCODE_ENTER,KeyEvent.META_SHIFT_ON); assertEquals("本文\n\n",inputText()); main { assertEquals(1,sends) }
+    }
+    @Test fun enterSettingsCanSelectActionsWhileSearchFieldsKeepSearch() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        var searches=0
+        main {
+            editor.setSingleLine(true); editor.imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            editor.setOnEditorActionListener { _,a,_ -> if (a==android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH) { searches++; true } else false }
+            activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
+        }
+        await("SEARCH EditorInfo") { "action=3" in diagnostic() }
+        runBlocking { app.settings.set(Prefs.screenEnter,"NEWLINE"); app.settings.state.first { it.screenEnter=="NEWLINE" } }
+        touch(rect("↵")); main { assertEquals(1,searches) }; assertEquals("",inputText())
+        key(KeyEvent.KEYCODE_ENTER,KeyEvent.META_SHIFT_ON); main { assertEquals(2,searches) }; assertEquals("",inputText())
+    }
+    @Test fun generalGreetingAndContinuationPredictionsWorkWithoutLearning() {
+        letters("OHA"); await("dictionary greeting completions") { findNode { it.text?.toString()=="おはようございます" }!=null }
+        assertNotNull(findNode { it.text?.toString()=="おはよう" }); key(KeyEvent.KEYCODE_ESCAPE)
+        letters("KYOUHA"); key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_ENTER)
+        await("general context") { findNode { it.text?.toString()=="いい天気ですね" }!=null }
+    }
+    @Test fun arbitraryLongInputIsNotSavedAsOneLearningRecord() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.learning.awaitLoaded(); app.settings.set(Prefs.learningEnabled,true); app.settings.state.first { it.learningEnabled } }
+        letters("A".repeat(60)); key(KeyEvent.KEYCODE_ENTER); assertEquals("あ".repeat(60),inputText())
+        SystemClock.sleep(300)
+        assertFalse(app.learning.state.value.entries.any { it.reading=="あ".repeat(60) })
+    }
+    @Test fun deletingLearningRejectsWorkPlannedBeforeDeletion() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.learning.awaitLoaded(); app.settings.set(Prefs.learningEnabled,true); app.settings.state.first { it.learningEnabled } }
+        val generation=app.learning.generation; val revision=app.learning.state.value.revision
+        app.learning.clear(); await("learning erased") { app.learning.state.value.revision>revision && app.learning.state.value.entries.isEmpty() }
+        app.learning.record("かんじ","漢字",generation); app.learning.recordContinuation("を","みせ","見せ",generation)
+        SystemClock.sleep(200); assertTrue(app.learning.state.value.entries.isEmpty()); assertTrue(app.learning.state.value.continuations.isEmpty())
+    }
+    @Test fun newPreferencesAndDictionaryEditsSurviveActivityRecreation() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        val original=app.settings.state.value.p[Prefs.dictionary] ?: "{}"
+        try {
+            runBlocking {
+                app.settings.set(Prefs.japaneseLayout,"QWERTY"); app.settings.set(Prefs.englishLayout,"FLICK")
+                app.settings.set(Prefs.screenEnter,"ACTION"); app.settings.set(Prefs.physicalEnter,"NEWLINE"); app.settings.set(Prefs.clipboardLimit,17)
+                app.settings.addWord("てすとよう","編集前"); app.settings.addWord("てすとよう","残す単語")
+                app.settings.editWord("てすとよう","編集前","てすとご","編集後")
+                app.settings.state.first { it.japaneseQwerty && it.englishFlick && it.clipboardLimit==17 && it.dictionary["てすとご"]?.contains("編集後")==true }
+            }
+            assertTrue(app.settings.state.value.dictionary["てすとよう"].orEmpty().contains("残す単語"))
+            assertFalse(app.settings.state.value.dictionary["てすとよう"].orEmpty().contains("編集前"))
+            val monitor=instrumentation.addMonitor(MainActivity::class.java.name,null,false)
+            try {
+                main { activity.recreate() }
+                activity=monitor.waitForActivityWithTimeout(10_000) as MainActivity
+            } finally { instrumentation.removeMonitor(monitor) }
+            await("recreated editor") { var present=false; main { present=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; present }
+            main {
+                editor=activity.findViewById<View>(android.R.id.content).findViewWithTag("test_input"); editor.requestFocus()
+                ImeControl.request(DisplayMode.FULL); activity.getSystemService(InputMethodManager::class.java).showSoftInput(editor,0)
+            }
+            await("recreated window focus") { activity.hasWindowFocus() && imeHeight()>300 }
+            touch(rect("k")); touch(rect("a")); assertEquals("か",inputText())
+            val saved=app.settings.state.value
+            assertEquals("ACTION",saved.screenEnter); assertEquals("NEWLINE",saved.physicalEnter); assertEquals(17,saved.clipboardLimit)
+            assertTrue(saved.japaneseQwerty && saved.englishFlick)
+        } finally { runBlocking { app.settings.set(Prefs.dictionary,original) } }
+    }
     private fun findNode(predicate: (AccessibilityNodeInfo)->Boolean): AccessibilityNodeInfo? {
         fun search(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
             if (node==null) return null
@@ -450,7 +629,7 @@ class DeviceInputTest {
             app.settings.set(Prefs.learningEnabled,true); app.settings.state.first { it.learningEnabled }
         }
         commitTsudukiwo(); clickLabel("見せてください")
-        runBlocking { withTimeout(10_000) { app.learning.state.first { it.continuations.any { c -> c.context=="続きを" && c.text=="見せてください" } } } }
+        runBlocking { withTimeout(10_000) { app.learning.state.first { it.continuations.any { c -> "続きを".endsWith(c.context) && "見せてください".startsWith(c.text) } } } }
         main { editor.setText("") }; instrumentation.waitForIdleSync()
         commitTsudukiwo(); key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
         assertEquals("続きを見せてください",inputText())
@@ -461,7 +640,7 @@ class DeviceInputTest {
         SystemClock.sleep(200)
         commitTsudukiwo(); key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
         assertEquals("続きをお願いします",inputText())
-        assertFalse(app.learning.state.value.continuations.any { it.context=="続きを" && it.text=="お願いします" })
+        assertFalse(app.learning.state.value.continuations.any { "続きを".endsWith(it.context) && "お願いします".startsWith(it.text) })
     }
     @Test fun physicalRomajiAndSpaceEnterConversion() {
         letters("KYOUHA"); await("きょうは") { inputText()=="きょうは" }
@@ -497,40 +676,31 @@ class DeviceInputTest {
         clickLabel("漢字"); SystemClock.sleep(300)
         assertEquals(1,app.learning.state.value.entries.first { it.reading=="かんじ" && it.text=="漢字" }.count)
     }
+    private fun gridCandidate(test: (String)->Boolean): AccessibilityNodeInfo? {
+        repeat(120) {
+            val item=findNode { it.isVisibleToUser && it.contentDescription?.toString()?.let(test)==true }
+            if (item!=null) return item
+            val list=findNode { it.contentDescription?.toString()=="変換候補の一覧" }
+            if (list?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)!=true) SystemClock.sleep(60)
+            else SystemClock.sleep(70)
+        }
+        return null
+    }
     @Test fun candidatePagesCanShowMoreThanSixtyChoices() {
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
         runBlocking { app.settings.set(Prefs.candidateCount,1000); app.settings.state.first { it.candidateCount==1000 } }
         letters("KOU"); key(KeyEvent.KEYCODE_SPACE); touch(rect("一覧"))
-        await("first 50 choices") { findNode { it.text?.toString()=="50 / 1000件" }!=null }
-        var more: AccessibilityNodeInfo?=null
-        repeat(20) {
-            if (more==null) {
-                more=findNode { it.contentDescription?.toString()=="さらに候補を表示" && it.isVisibleToUser }
-                if (more==null) {
-                    findNode { it.className?.toString()=="android.widget.ScrollView" }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-                    SystemClock.sleep(120)
-                }
-            }
-        }
-        assertNotNull("A page action is reachable by scrolling",more)
-        assertTrue(more!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-        await("more than sixty displayed") { findNode { it.text?.toString()=="100 / 1000件" }!=null }
+        val item=gridCandidate { it.startsWith("候補 61：") }
+        assertNotNull("Scroll directly beyond sixty without any more button",item)
+        assertNull(findNode { it.contentDescription?.toString()=="さらに候補を表示" })
+        val word=item!!.contentDescription.toString().substringAfter('：')
+        assertTrue(item.performAction(AccessibilityNodeInfo.ACTION_CLICK)); await("61st choice committed") { inputText()==word }
+        captureHardware("continuous-candidates")
     }
     @Test fun legacyCandidateLimitCanSearchForMore() {
         letters("KOU"); key(KeyEvent.KEYCODE_SPACE); touch(rect("一覧"))
-        await("original thirty choices") { findNode { it.text?.toString()=="30 / 30件" }!=null }
-        var more: AccessibilityNodeInfo?=null
-        repeat(20) {
-            if (more==null) {
-                more=findNode { it.contentDescription?.toString()=="さらに候補を表示" && it.isVisibleToUser }
-                if (more==null) {
-                    findNode { it.className?.toString()=="android.widget.ScrollView" }?.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD)
-                    SystemClock.sleep(120)
-                }
-            }
-        }
-        assertNotNull(more); assertTrue(more!!.performAction(AccessibilityNodeInfo.ACTION_CLICK))
-        await("search grows beyond the old saved setting") { findNode { it.text?.toString()=="50 / 130件" }!=null }
+        assertNotNull("Saved setting of thirty does not stop scrolling",gridCandidate { it.startsWith("候補 81：") })
+        assertNull(findNode { it.text?.toString()=="見る" || it.contentDescription?.toString()=="さらに候補を表示" })
     }
     @Test fun diamondFlickBubbleIsVisibleAndTracksTheDirection() {
         val key=rect("か行"); val density=activity.resources.displayMetrics.density
@@ -713,7 +883,7 @@ class DeviceInputTest {
         assertEquals("あいうえおく1234567890",inputText())
     }
     @Test fun englishQwertyAndShiftCapsLock() {
-        touch(rect("日本語")); touch(rect("h")); touch(rect("e")); touch(rect("l")); assertEquals("hel",inputText())
+        touch(rect("英語に切り替え")); touch(rect("h")); touch(rect("e")); touch(rect("l")); assertEquals("hel",inputText())
         touch(rect("⇧")); touch(rect("A")); touch(rect("b")); assertEquals("helAb",inputText())
         val shift=rect("⇧"); touch(shift); touch(shift)
         touch(rect("C")); touch(rect("D")); assertEquals("helAbCD",inputText())

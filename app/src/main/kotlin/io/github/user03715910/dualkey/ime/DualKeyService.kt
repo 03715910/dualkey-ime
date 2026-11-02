@@ -30,7 +30,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private val conversion get() = app.japaneseDictionary.engine.value
     private data class CandidateQuery(val reading: String, val prediction: Boolean, val limit: Int,
         val dictionary: Map<String, List<String>>, val engine: ConversionEngine, val learning: LearningSnapshot,
-        val semantic: JapaneseLexicon?)
+        val semantic: JapaneseLexicon?,val symbols: Map<String,List<String>>,val context: Candidate?)
     private var candidateQuery: CandidateQuery? = null
     private var candidateJob: Job? = null
     private var candidateLoading=false
@@ -70,11 +70,20 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private lateinit var inputManager: InputManager
     private var inputStarted = false
     private var lastPolicy: HardwarePolicy? = null
+    private val clipboardManager by lazy { getSystemService(ClipboardManager::class.java) }
+    private var clipboardShowing=false
+    private var blockedClipTimestamp=-1L
+    private val clipboardListener=ClipboardManager.OnPrimaryClipChangedListener {
+        if (settings.clipboardHistory && hasEditor() && !clipboardEligible()) {
+            blockedClipTimestamp=runCatching { clipboardManager.primaryClipDescription?.timestamp }.getOrNull() ?: -1L
+        } else captureClipboard()
+    }
 
     // Explicit support diagnostics contain state only, never composing or committed text.
     override fun dump(fd: java.io.FileDescriptor?,writer: java.io.PrintWriter?,args: Array<out String>?) {
         writer?.println("DualKey: requested=$hardwareCandidates, converting=$converting, continuation=$continuationCandidates, selected=$selected, choices=${candidates.size}")
         writer?.println("started=$inputStarted, sensitive=$sensitive, english=$english, predictions=$predictionsAllowed, mode=${visibility.mode}")
+        writer?.println("action=${(currentInputEditorInfo?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION}")
         writer?.println("attributeToken=${window?.window?.attributes?.token!=null}, decorToken=${window?.window?.decorView?.windowToken!=null}, panel=${hardwarePanel.status}")
         if (Build.VERSION.SDK_INT>=30) writer?.println("captionVisible=${window?.window?.decorView?.rootWindowInsets?.isVisible(WindowInsets.Type.captionBar())}")
     }
@@ -83,6 +92,9 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         super.onCreate()
         inputManager = getSystemService(InputManager::class.java)
         inputManager.registerInputDeviceListener(this, Handler(Looper.getMainLooper()))
+        clipboardManager.addPrimaryClipChangedListener(clipboardListener)
+        scope.launch { app.symbols.entries.collect { refreshCandidates() } }
+        scope.launch { app.clipboard.state.collect { if (clipboardShowing) clipboardHistory() } }
         scope.launch { app.japaneseDictionary.engine.collect { refreshCandidates() } }
         scope.launch { app.semanticDictionary.lexicon.collect { refreshCandidates() } }
         scope.launch { app.japaneseDictionary.message.collect { ui?.dictionaryStatus(it) } }
@@ -213,6 +225,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         super.onFinishInput()
     }
     override fun onDestroy() {
+        clipboardManager.removePrimaryClipChangedListener(clipboardListener)
         hardwarePanel.dismiss()
         inputManager.unregisterInputDeviceListener(this)
         translator.close(); scope.cancel(); ImeControl.inputActive=false; inputStarted=false; windowShown=false; publishVisibility()
@@ -270,6 +283,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         if (settings.sound) getSystemService(AudioManager::class.java).playSoundEffect(AudioManager.FX_KEY_CLICK,0.3f)
     }
     private fun invalidateTranslation() {
+        clipboardShowing=false
         revision++; translationJob?.cancel(); translationJob=null; variantJob?.cancel(); variantJob=null; ui?.hideTranslation()
     }
     private fun resetVariant() { variantJob?.cancel(); variantJob=null; variant=null }
@@ -285,19 +299,20 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private fun refreshCandidates() {
         continuationCandidates=false
         if (predictionsAllowed && !english && !composer.isEmpty && (converting || settings.japanesePrediction)) {
-            if (requestedReading!=composer.reading) { requestedReading=composer.reading; requestedLimit=settings.candidateCount }
+            if (requestedReading!=composer.reading) { requestedReading=composer.reading; requestedLimit=maxOf(64,settings.candidateCount) }
             val query=CandidateQuery(composer.reading,!converting && settings.japanesePrediction,
                 maxOf(settings.candidateCount,requestedLimit),settings.dictionary,conversion,
                 if (app.settings.isLoaded && settings.learningEnabled && learningAllowed) app.learning.state.value else LearningSnapshot(),
-                app.semanticDictionary.lexicon.value)
+                app.semanticDictionary.lexicon.value,app.symbols.entries.value,
+                committedTail?.takeIf { contextAllowed }?.word)
             if (candidateQuery!=query) {
                 val retain=candidateQuery?.let { it.reading==query.reading && it.prediction==query.prediction }==true
                 candidateJob?.cancel(); candidateQuery=query; candidateLoading=false
-                if (converting) {
+                if (converting && query.limit<=100) {
                     // Space/Enter stays ordered even when pressed immediately after typing.
                     setCandidateRecords(personalized(query))
                 } else {
-                    if (!retain) setCandidateRecords(emptyList())
+                    if (!retain) setCandidateRecords(if (converting) personalized(query.copy(limit=64)) else emptyList())
                     candidateLoading=true
                     candidateJob=scope.launch {
                         delay(12)
@@ -314,16 +329,36 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             val next=if (contextAllowed && inputStarted && !english && composer.isEmpty && settings.japanesePrediction && tail!=null && validTail(tail)) {
                 continuationCandidates=true
                 NextWordPrediction.candidates(tail.word,
-                    if (settings.learningEnabled && learningAllowed) app.learning.state.value.continuations else emptyList(),settings.candidateCount)
+                    if (settings.learningEnabled && learningAllowed) app.learning.state.value.continuations.filter { c ->
+                        tail.word.text.endsWith(c.context) && c.context.length<=32 && c.text.length<=32 && c.reading.length<=32 &&
+                            ((conversion as? DictionaryConversionEngine)?.knownChoice(c.reading,c.text)==true ||
+                                c.text in PhrasePrediction.candidates(c.reading,false).map { it.text } ||
+                                c.text in SemanticConversion.equivalents(app.semanticDictionary.lexicon.value,c.reading,c.reading))
+                    } else emptyList(),settings.candidateCount)
             } else emptyList()
             setCandidateRecords(if (predictionsAllowed && english && settings.englishPrediction)
                 EnglishPrediction.candidates(englishWord,settings.candidateCount).map { Candidate(it,it.lowercase()) } else next)
         }
         showCandidates()
     }
-    private fun personalized(query: CandidateQuery): List<Candidate> = Personalization.candidates(query.reading,
-        SemanticConversion.augment(query.reading,query.engine.candidates(query.reading,query.prediction,query.limit),query.semantic,query.limit),
-        query.learning.entries,query.prediction,query.limit)
+    private fun personalized(query: CandidateQuery): List<Candidate> {
+        val converted=(query.engine as? DictionaryConversionEngine)?.candidates(query.reading,query.prediction,query.limit,query.learning.entries,query.learning.continuations)
+            ?: query.engine.candidates(query.reading,query.prediction,query.limit)
+        val general=(PhrasePrediction.candidates(query.reading,query.prediction)+converted).distinctBy { it.text }
+        val symbols=SymbolCandidates.candidates(query.reading,query.symbols,query.prediction)
+        val equivalents=SemanticConversion.augment(query.reading,general,query.semantic,query.limit)
+        val context=query.context?.let { NextWordPrediction.candidates(it,query.learning.continuations,64) }.orEmpty()
+            .filter { it.reading==query.reading || query.prediction && it.reading.startsWith(query.reading) }
+        val combined=(context+equivalents.take((query.limit-symbols.size).coerceAtLeast(1))+symbols).distinctBy { it.text }
+        // Legacy whole-input records are considered only if still supported by the dictionaries.
+        val history=query.learning.entries.filter { h ->
+            (h.reading==query.reading || query.prediction && h.reading.startsWith(query.reading)) &&
+                (query.engine as? DictionaryConversionEngine)?.knownChoice(h.reading,h.text)==true ||
+                (h.reading==query.reading && (h.text in symbols.map { it.text } || h.text in SemanticConversion.equivalents(query.semantic,h.reading,h.reading) ||
+                    h.text in PhrasePrediction.candidates(h.reading,false).map { it.text }))
+        }
+        return Personalization.candidates(query.reading,combined,history,query.prediction,query.limit,context.map { it.text }.toSet())
+    }
     private fun setCandidateRecords(values: List<Candidate>) {
         val chosen=if (converting || continuationCandidates) candidateRecords.getOrNull(selected)?.text else null
         candidateRecords=values; candidates=values.map { it.text }
@@ -331,7 +366,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun showCandidates() {
         if (selected >= candidates.size) selected=-1
-        val canExpand=candidateQuery?.let { it.limit<1000 && candidates.size>=it.limit }==true
+        val canExpand=candidateQuery?.let { it.limit<10000 && candidates.size>=it.limit }==true
         ui?.googleComposition(variant?.takeIf { it.googlePowered }?.text)
         ui?.candidates(candidates,selected,::commitCandidate,canExpand,candidateLoading)
         showHardwareCandidates()
@@ -361,9 +396,9 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         super.onUpdateCursorAnchorInfo(info)
         hardwarePanel.cursor(info); showHardwareCandidates()
     }
-    private fun moreCandidates() {
+    private fun moreCandidates(all: Boolean=false) {
         if (candidateLoading || composer.isEmpty || sensitive || english) return
-        requestedLimit=(maxOf(requestedLimit,settings.candidateCount)+100).coerceAtMost(1000)
+        requestedLimit=if (all) 10000 else (maxOf(requestedLimit,settings.candidateCount)+1000).coerceAtMost(10000)
         refreshCandidates()
     }
     private fun syncComposition() {
@@ -391,8 +426,25 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }.getOrDefault(false)
     private fun confirmed(candidate: Candidate,previous: CommittedTail?,learn: Boolean) {
         if (learn && learningAllowed && settings.learningEnabled && !sensitive && !numeric && !english) {
-            app.learning.record(candidate.reading,candidate.text)
-            previous?.let { app.learning.recordContinuation(it.word.text,candidate.reading,candidate.text) }
+            val generation=app.learning.generation
+            val engine=conversion as? DictionaryConversionEngine
+            val semantic=app.semanticDictionary.lexicon.value
+            val symbolEntries=app.symbols.entries.value
+            scope.launch(Dispatchers.Default) {
+                fun units(word: Candidate): List<Candidate> {
+                    val parts=engine?.learningUnits(word.reading,word.text).orEmpty()
+                    if (parts.isNotEmpty()) return parts
+                    return if (word.text in symbolEntries[Personalization.normalize(word.reading)].orEmpty() ||
+                        word.text in SemanticConversion.equivalents(semantic,word.reading,word.reading) ||
+                        word in PhrasePrediction.candidates(word.reading,false)) listOf(word) else emptyList()
+                }
+                val parts=units(candidate)
+                val before=previous?.let { units(it.word).lastOrNull() }
+                if (generation==app.learning.generation && settings.learningEnabled) {
+                    parts.forEach { app.learning.record(it.reading,it.text,generation) }
+                    (listOfNotNull(before)+parts).zipWithNext().forEach { (a,b) -> app.learning.recordContinuation(a.text,b.reading,b.text,generation) }
+                }
+            }
         }
         committedTail=if (contextAllowed && !english && NextWordPrediction.validContext(candidate.text))
             CommittedTail(candidate,cursorPosition()) else null
@@ -463,14 +515,33 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         else if (candidates.isNotEmpty()) selected=(selected+1)%candidates.size
         syncComposition()
     }
-    private fun enter() {
+    private fun enter(physical: Boolean=false,shiftPressed: Boolean=false) {
         invalidateTranslation()
+        val info=currentInputEditorInfo
+        val action=(info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
+        val type=info?.inputType ?: InputType.TYPE_NULL
+        val variation=type and InputType.TYPE_MASK_VARIATION
+        val multiline=type and InputType.TYPE_TEXT_FLAG_MULTI_LINE!=0
+        val privateField=sensitive || numeric || variation in setOf(InputType.TYPE_TEXT_VARIATION_URI,InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS) ||
+            (!multiline && action in setOf(EditorInfo.IME_ACTION_SEARCH,EditorInfo.IME_ACTION_GO,EditorInfo.IME_ACTION_NEXT,EditorInfo.IME_ACTION_PREVIOUS,EditorInfo.IME_ACTION_DONE))
+        if (physical && shiftPressed && !privateField) {
+            if (!composer.isEmpty) commitComposition(true)
+            finishEnglish(); committedTail=null; resetConversion(); currentInputConnection?.commitText("\n",1); refreshCandidates(); return
+        }
         if (continuationCandidates && selected in candidates.indices) { commitCandidate(selected); return }
         if (!composer.isEmpty) { commitComposition(true); return }
         committedTail=null; finishEnglish(); refreshCandidates()
-        val info=currentInputEditorInfo
-        if (info?.actionLabel != null && info.actionId != 0) currentInputConnection?.performEditorAction(info.actionId)
-        else if (!sendDefaultEditorAction(true)) currentInputConnection?.commitText("\n",1)
+        val behavior=if (physical) settings.physicalEnter else settings.screenEnter
+        val newline=!privateField && (behavior=="NEWLINE" || (!physical && behavior=="SMART_NEWLINE" && (multiline || action==EditorInfo.IME_ACTION_SEND)))
+        if (newline) { currentInputConnection?.commitText("\n",1); return }
+        if (behavior=="ACTION" && action !in setOf(EditorInfo.IME_ACTION_NONE,EditorInfo.IME_ACTION_UNSPECIFIED)) {
+            currentInputConnection?.performEditorAction(if (info?.actionLabel!=null && info.actionId!=0) info.actionId else action); return
+        }
+        // SEND is invoked only when the editor advertises it; raw key events never guess a send operation.
+        if (physical && behavior=="SMART_SEND" && action==EditorInfo.IME_ACTION_SEND && !privateField) {
+            if (currentInputConnection?.performEditorAction(EditorInfo.IME_ACTION_SEND)!=true) currentInputConnection?.commitText("\n",1)
+        } else if (info?.actionLabel != null && info.actionId != 0) currentInputConnection?.performEditorAction(info.actionId)
+        else if (!sendDefaultEditorAction(true) && !privateField) currentInputConnection?.commitText("\n",1)
     }
     private fun delete() {
         invalidateTranslation()
@@ -493,6 +564,72 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val cycle=cycles.firstOrNull { last in it } ?: return
         invalidateTranslation(); resetVariant(); composer.replace(s.dropLast(1)+cycle[(cycle.indexOf(last)+1)%cycle.length]); resetConversion(); syncComposition()
     }
+    private fun deleteChunk() {
+        val connection=currentInputConnection ?: return
+        invalidateTranslation(); committedTail=null
+        connection.beginBatchEdit()
+        try {
+            if (!connection.getSelectedText(0).isNullOrEmpty()) {
+                connection.finishComposingText(); connection.commitText("",1)
+            } else if (!composer.isEmpty || englishWord.isNotEmpty()) {
+                connection.setComposingText("",1); connection.finishComposingText()
+            } else if (sensitive || numeric) {
+                connection.deleteSurroundingTextInCodePoints(1,0)
+            } else {
+                val before=connection.getTextBeforeCursor(EditingPolicy.CONTEXT_LIMIT+1,0)?.toString().orEmpty()
+                val count=EditingPolicy.chunkBeforeCursor(before)
+                if (count>0) connection.deleteSurroundingTextInCodePoints(count,0)
+            }
+            clearState()
+        } finally { connection.endBatchEdit() }
+        refreshCandidates()
+    }
+    private fun clipboardEligible() = hasEditor() && !sensitive && !numeric && learningAllowed && !getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
+    private fun clipboardText(): Pair<String,Boolean>? {
+        if (getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) return null
+        return try {
+        val clip=clipboardManager.primaryClip
+        val value=if (clip!=null && clip.itemCount>0) clip.getItemAt(0).text?.toString() else null
+        if (value.isNullOrEmpty() || value.length>1_000_000) null
+        else value to (clip?.description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE",false)==true || clip?.description?.timestamp==blockedClipTimestamp)
+        } catch (_: Exception) { null }
+    }
+    private fun captureClipboard() {
+        if (!settings.clipboardHistory || !clipboardEligible()) return
+        clipboardText()?.let { (text,sensitiveClip) -> app.clipboard.add(text,sensitiveClip) }
+    }
+    private fun pasteText(text: String) {
+        val connection=currentInputConnection ?: return
+        connection.beginBatchEdit()
+        try {
+            invalidateTranslation()
+            if (connection.getSelectedText(0).isNullOrEmpty()) {
+                if (!composer.isEmpty) commitComposition(false)
+                finishEnglish()
+            }
+            clearState(); connection.finishComposingText()
+            connection.commitText(text,1)
+        } finally { connection.endBatchEdit() }
+        refreshCandidates()
+    }
+    private fun pasteClipboard() {
+        val clip=clipboardText()
+        if (clip==null) { Toast.makeText(this,"貼り付けられる文字列がありません",Toast.LENGTH_SHORT).show(); return }
+        pasteText(clip.first)
+    }
+    private fun clipboardHistory() {
+        if (!clipboardEligible()) {
+            if (clipboardShowing) ui?.hideTranslation()
+            clipboardShowing=false
+            Toast.makeText(this,"この入力欄ではクリップボード履歴を表示しません",Toast.LENGTH_SHORT).show(); return
+        }
+        clipboardShowing=true
+        ui?.showClipboard(app.clipboard.current(),settings.clipboardHistory,
+            { entry -> if (entry in app.clipboard.current()) pasteText(entry.text) },
+            { entry -> app.clipboard.remove(entry) },
+            { app.clipboard.clear() },
+            { clipboardShowing=false; ui?.hideTranslation() })
+    }
     private fun moveCursor(step: Int) {
         invalidateTranslation()
         if (continuationCandidates && selected in candidates.indices) {
@@ -506,9 +643,13 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         }
     }
     private fun onScreenKey(key: String) {
+        if (key=="more_candidates") { moreCandidates(); return }
+        if (key!="shift") lastShift=0
         hardwareCandidates=false; hardwarePanel.dismiss()
         when (key) {
-            "more_candidates" -> moreCandidates()
+            "expand_candidates" -> moreCandidates(true)
+            "paste" -> pasteClipboard()
+            "clipboard_history" -> { app.clipboard.prune(); clipboardHistory() }
             "cycle_script" -> cycleScript()
             "mode" -> switchMode()
             "full" -> chooseDisplay(DisplayMode.FULL)
@@ -521,16 +662,17 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             "space" -> space()
             "enter" -> enter()
             "delete" -> delete()
+            "delete_chunk" -> deleteChunk()
             "cursor_left" -> moveCursor(-1)
             "cursor_right" -> moveCursor(1)
             "modify" -> modifyKana()
             "punctuation" -> type(if (composer.text.endsWith("、")) "。" else "、")
             "shift" -> {
                 val now=SystemClock.uptimeMillis()
-                shift=if (shift==2) 0 else if (now-lastShift<350 && shift==1) 2 else if (shift==1) 0 else 1
+                shift=ScreenShift.tap(shift,if (lastShift>0) now-lastShift else Long.MAX_VALUE,ViewConfiguration.getDoubleTapTimeout().toLong())
                 lastShift=now; rebuild()
             }
-            else -> { type(key); if (english && shift==1 && key.any(Char::isLetter)) { shift=0; rebuild() } }
+            else -> { type(key); val next=ScreenShift.afterInput(shift,key); if (next!=shift) { shift=next; lastShift=0; rebuild() } }
         }
     }
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
@@ -558,7 +700,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 selected=if (selected<0) (if (step>0) 0 else candidates.lastIndex) else (selected+step+candidates.size)%candidates.size
                 if (converting) syncComposition() else showCandidates()
             }
-            keyCode==KeyEvent.KEYCODE_ENTER || keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER -> enter()
+            keyCode==KeyEvent.KEYCODE_ENTER || keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER -> enter(true,event.isShiftPressed)
             keyCode==KeyEvent.KEYCODE_DEL -> delete()
             keyCode==KeyEvent.KEYCODE_ESCAPE && (continuationCandidates || !composer.isEmpty || englishWord.isNotEmpty()) -> {
                 invalidateTranslation()

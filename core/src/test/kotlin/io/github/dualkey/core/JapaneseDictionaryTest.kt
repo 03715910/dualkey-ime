@@ -77,4 +77,21 @@ class JapaneseDictionaryTest {
         println("30 dictionary/prediction searches: ${millis}ms")
         assertTrue("Bounded indexed search: ${millis}ms", millis < 15_000)
     }
+    @Test fun learningUsesKnownUnitsRatherThanAnArbitraryInputSentence() {
+        val reading="にほんごをべんきょうします"
+        val surface=engine.candidates(reading,false,30).first().text
+        val units=engine.learningUnits(reading,surface)
+        assertTrue(units.isNotEmpty())
+        assertEquals(reading,units.joinToString("") { it.reading })
+        assertEquals(surface,units.joinToString("") { it.text })
+        assertTrue(units.all { engine.knownChoice(it.reading,it.text) && it.text.length<=32 })
+        val arbitrary="あいおえうえお".repeat(10)
+        assertTrue(engine.learningUnits(arbitrary,arbitrary).none { it.reading==arbitrary || it.text==arbitrary })
+    }
+    @Test fun learnedWordCostsParticipateInsideASentence() {
+        val before=engine.candidates("かんじがいい",false,100).map { it.text }
+        val after=engine.candidates("かんじがいい",false,100,listOf(LearnedChoice("かんじ","漢字",1000,1)),emptyList()).map { it.text }
+        assertTrue(after.toString(),"漢字がいい" in after)
+        assertTrue("$before -> $after",after.indexOf("漢字がいい")<before.indexOf("漢字がいい") || after.first()=="漢字がいい")
+    }
 }

@@ -8,6 +8,8 @@ object NextWordPrediction {
     private fun rule(endings: String,vararg words: Pair<String,String>) =
         Rule(endings.split('|'),words.map { Candidate(it.first,it.second) })
     private val rules=listOf(
+        rule("今日は|きょうは|明日は|あしたは","いい天気ですね" to "いいてんきですね","どうですか" to "どうですか","何をしますか" to "なにをしますか","よろしくお願いします" to "よろしくおねがいします"),
+        rule("おはよう","ございます" to "ございます","！" to "！"),
         rule("続きを|つづきを|続き|つづき","お願いします" to "おねがいします","教えてください" to "おしえてください","見せてください" to "みせてください","聞かせてください" to "きかせてください"),
         rule("よろしく|宜しく","お願いします" to "おねがいします","お願いいたします" to "おねがいいたします"),
         rule("ありがとう|有難う","ございます" to "ございます","ございました" to "ございました"),
@@ -48,13 +50,18 @@ object NextWordPrediction {
 
     fun candidates(context: Candidate,history: List<LearnedContinuation>,limit: Int): List<Candidate> {
         if (!validContext(context.text)) return emptyList()
-        val learned=history.asSequence().filter { it.context==context.text && valid(it) }
+        val learned=history.asSequence().filter { (it.context==context.text || context.text.endsWith(it.context)) && valid(it) }
             .sortedWith(compareByDescending<LearnedContinuation> { it.count }.thenByDescending { it.lastUsed }.thenBy { it.text })
             .map { Candidate(it.text,it.reading) }.toList()
         val matching=rules.mapNotNull { rule ->
             rule.endings.filter { context.text.endsWith(it) || context.reading.endsWith(it) }
                 .maxOfOrNull { it.length }?.let { it to rule.choices }
         }.sortedByDescending { it.first }.flatMap { it.second }
-        return (learned+matching).distinctBy { it.text }.take(limit.coerceIn(2,1000))
+        // A learned first word can promote a natural full expression without storing that sentence.
+        val support=history.filter { (it.context==context.text || context.text.endsWith(it.context)) && valid(it) }
+        val promoted=matching.distinctBy { it.text }.filter { candidate -> support.any { candidate.text.startsWith(it.text) } }
+            .sortedWith(compareByDescending<Candidate> { candidate -> support.filter { candidate.text.startsWith(it.text) }.sumOf { kotlin.math.ln(it.count+1.0) } }
+                .thenByDescending { candidate -> support.filter { candidate.text.startsWith(it.text) }.maxOfOrNull { it.lastUsed } ?: 0L })
+        return (promoted+learned+matching).distinctBy { it.text }.take(limit.coerceIn(2,1000))
     }
 }

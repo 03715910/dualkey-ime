@@ -14,7 +14,7 @@ object SemanticConversion {
 
     /** Reserve a small tail for equivalents; preserve the leading Japanese order. */
     fun augment(reading: String, base: List<Candidate>, lexicon: JapaneseLexicon?, limit: Int): List<Candidate> {
-        val maximum=limit.coerceIn(2,1000)
+        val maximum=limit.coerceIn(2,10000)
         if (reading.none { it in 'ぁ'..'ゖ' }) return base.take(maximum)
         val japanese=base.firstOrNull { it.reading==reading }?.text ?: reading
         val meanings=equivalents(lexicon,reading,japanese)

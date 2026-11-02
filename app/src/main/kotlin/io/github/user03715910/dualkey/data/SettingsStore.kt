@@ -44,10 +44,22 @@ object Prefs {
     val visibilityNotification = booleanPreferencesKey("visibility_notification")
     val hideImeCaption = booleanPreferencesKey("hide_ime_caption_when_hidden")
     val pendingNotificationDisplay = stringPreferencesKey("pending_notification_display")
+    val japaneseLayout = stringPreferencesKey("screen_japanese_layout")
+    val englishLayout = stringPreferencesKey("screen_english_layout")
+    val screenEnter = stringPreferencesKey("screen_enter_behavior")
+    val physicalEnter = stringPreferencesKey("physical_enter_behavior")
+    val clipboardHistory = booleanPreferencesKey("clipboard_history_enabled")
+    val clipboardLimit = intPreferencesKey("clipboard_history_limit")
 }
 
 data class Settings(val p: Preferences = emptyPreferences()) {
     val initialEnglish get() = p[Prefs.initialEnglish] ?: false
+    val japaneseQwerty get() = p[Prefs.japaneseLayout]=="QWERTY"
+    val englishFlick get() = p[Prefs.englishLayout]=="FLICK"
+    val screenEnter get() = p[Prefs.screenEnter] ?: "SMART_NEWLINE"
+    val physicalEnter get() = p[Prefs.physicalEnter] ?: "SMART_SEND"
+    val clipboardHistory get() = p[Prefs.clipboardHistory] ?: false
+    val clipboardLimit get() = (p[Prefs.clipboardLimit] ?: 20).coerceIn(5,100)
     val numberRow get() = p[Prefs.numberRow] ?: true
     val flickDp get() = (p[Prefs.flickDp] ?: 24).coerceIn(8,64)
     val keyHeight get() = (p[Prefs.keyHeight] ?: 40).coerceIn(32,80)
@@ -123,9 +135,20 @@ class SettingsStore(private val context: Context, scope: CoroutineScope) {
             val json = JSONObject(it[Prefs.dictionary] ?: "{}")
             val existing = json.optJSONArray(reading) ?: JSONArray()
             val list = (0 until existing.length()).map { i -> existing.getString(i) }
-            json.put(reading, JSONArray((list + word).distinct().take(30)))
+            json.put(reading, JSONArray((list + word).distinct()))
             it[Prefs.dictionary] = json.toString()
         }
     }
     suspend fun removeWord(reading: String) { context.store.edit { val j = JSONObject(it[Prefs.dictionary] ?: "{}"); j.remove(reading); it[Prefs.dictionary] = j.toString() } }
+    suspend fun editWord(oldReading: String,oldWord: String,reading: String,word: String) { context.store.edit {
+        val json=JSONObject(it[Prefs.dictionary] ?: "{}")
+        val old=json.optJSONArray(oldReading) ?: JSONArray()
+        val kept=(0 until old.length()).map { old.getString(it) }.filterNot { value -> value==oldWord }
+        if (kept.isEmpty()) json.remove(oldReading) else json.put(oldReading,JSONArray(kept))
+        if (reading.isNotEmpty() && word.isNotEmpty()) {
+            val current=json.optJSONArray(reading) ?: JSONArray()
+            json.put(reading,JSONArray(((0 until current.length()).map { current.getString(it) }+word).distinct()))
+        }
+        it[Prefs.dictionary]=json.toString()
+    } }
 }

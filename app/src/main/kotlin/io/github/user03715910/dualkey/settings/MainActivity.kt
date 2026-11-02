@@ -261,6 +261,29 @@ class MainActivity : AppCompatActivity() {
     private fun inputSettings() {
         val s=app.settings.state.value
         heading("入力とサイズ","お好みの大きさと操作感に。")
+        section("画面キーボードの入力方式") {
+            selection("日本語の配列",listOf("12キーフリック","ローマ字QWERTY"),if (s.japaneseQwerty) 1 else 0) { save(Prefs.japaneseLayout,if (it==1) "QWERTY" else "FLICK") }
+            selection("英語の配列",listOf("QWERTY","12キーフリック"),if (s.englishFlick) 1 else 0) { save(Prefs.englishLayout,if (it==1) "FLICK" else "QWERTY") }
+            text("日英は下段の「abc／日本語」で切り替えます。画面配列の設定は外付けキーボードに影響しません。")
+        }
+        section("Enterキー") {
+            selection("画面キーボード",listOf("チャット・複数行は改行","入力先のアクション","常に改行（通常の文章欄）"),listOf("SMART_NEWLINE","ACTION","NEWLINE").indexOf(s.screenEnter).coerceAtLeast(0)) { save(Prefs.screenEnter,listOf("SMART_NEWLINE","ACTION","NEWLINE")[it]) }
+            selection("物理キーボード",listOf("送信対応欄は送信","入力先のアクション","改行（通常の文章欄）"),listOf("SMART_SEND","ACTION","NEWLINE").indexOf(s.physicalEnter).coerceAtLeast(0)) { save(Prefs.physicalEnter,listOf("SMART_SEND","ACTION","NEWLINE")[it]) }
+            text("未確定の日本語はまず確定します。物理Shift＋Enterは改行です。送信は入力先がSENDを通知する欄で行います。LINEなどの実際の対応はアプリ側の設定・仕様によります。検索・URL・パスワード欄では入力先のアクションを優先します。")
+        }
+        section("貼り付けと履歴") {
+            toggle("クリップボード履歴を保存",Prefs.clipboardHistory,s.clipboardHistory)
+            slider("履歴の最大件数",Prefs.clipboardLimit,s.clipboardLimit,5,100)
+            text("初期状態はOFFです。ONにすると、DualKeyの通常入力中に取得できた文字列を端末内だけに保存します。履歴は読込・表示時に24時間以内へ整理します。OFFにすると保存済み履歴も削除します。")
+            text("機密フラグ付きのコピー、パスワード・学習禁止欄、メール・URL・長い数字列などは履歴へ保存しません。機密と通知されない文章を完全に判別することはできないため、秘密の文章を扱うときはOFFにしてください。通常の貼り付けは履歴OFFでも使えます。")
+            button("クリップボード履歴を全削除") {
+                AlertDialog.Builder(this).setMessage("保存したクリップボード履歴を削除しますか？")
+                    .setPositiveButton("削除") { _,_ -> app.clipboard.clear(); toast("履歴を削除しました") }.setNegativeButton("戻る",null).show()
+            }
+        }
+        section("削除の長押し") {
+            text("未確定の文字列はまとめて削除します。確定後はカーソル直前の句読点区切りを削除し、選択範囲があれば選択範囲を優先します。改行直後は改行だけ、パスワード・数字欄や範囲を確認できない長文は1文字ずつ削除します。")
+        }
         section("大きさ") {
             slider("キーの高さ",Prefs.keyHeight,s.keyHeight,32,80," dp")
             slider("全体の倍率",Prefs.heightPercent,s.heightPercent,70,140," %")
@@ -323,12 +346,12 @@ class MainActivity : AppCompatActivity() {
         section("予測候補") {
             toggle("日本語の予測候補",Prefs.japanesePrediction,s.japanesePrediction)
             toggle("英語の予測候補",Prefs.englishPrediction,s.englishPrediction)
-            slider("最初に検索する候補数",Prefs.candidateCount,s.candidateCount,2,1000)
-            text("「一覧」で50件ずつ表示し、さらに検索できます。最大1,000件まで選べます。")
+            slider("最初に検索する候補数",Prefs.candidateCount,maxOf(64,s.candidateCount),64,1000)
+            text("最初の検索は最低64件です。「一覧」を開くと続きを背景で検索し、ボタンなしの連続スクロールで閲覧できます。表示するセルだけを描画し、計算量保護の上限は10,000件です。")
         }
         section("変換の学習") {
             toggle("よく使う日本語の変換を学習",Prefs.learningEnabled,s.learningEnabled)
-            text("確定した語句の読み・表記・使用回数と最終使用時刻、直前の確定語句と次の語句の組合せを端末内に保存します。よく使う変換や続きの言葉を上位へ表示します。パスワードや学習禁止の入力欄では保存・利用しません。")
+            text("一般辞書の語句・定型表現と文法の接続を予測の基礎にします。学習は辞書で確認できた単語・語句へ分割し、読み・表記・使用回数・最終使用時刻と隣接する語の組合せだけを端末内に保存します。任意の入力文を丸ごと登録しません。頻度・文脈・辞書順位を合わせて候補を並べます。パスワードや学習禁止の入力欄では保存・利用しません。")
             text(app.learning.message.value).tag="learning_status"
             button("学習データを削除") {
                 AlertDialog.Builder(this).setTitle("学習データを削除しますか？")
@@ -339,7 +362,7 @@ class MainActivity : AppCompatActivity() {
         section("ユーザー辞書","追加した単語は端末内に保存します。") {
             text("登録した読み：${s.dictionary.size}件",16f)
             button("単語を追加",true) { addWord() }
-            button("登録した単語を確認・削除") { dictionary() }
+            button("登録した単語を確認・編集・削除") { dictionary() }
             text("約120万組の読みと表記、約5万字の単漢字に対応するオフライン辞書を使用します。字形の表示は端末のフォントにも依存します。")
             text(app.japaneseDictionary.message.value)
         }
@@ -399,6 +422,7 @@ class MainActivity : AppCompatActivity() {
         section("入力とプライバシー") {
             text("入力文章を独自サーバーへ送信しません。キー操作の履歴は記録しません。パスワード欄では予測・学習・翻訳・未確定プレビューを無効にします。",16f)
             text("通信はアプリ更新、翻訳モデル取得、Google ML Kitの利用状況・診断通信に使います。変換と翻訳文は端末内で処理します。学習ON時は確定した語句の読み・表記・使用回数・最終使用時刻と、前後の確定語句の組合せを端末内に保存します。「変換と辞書」で停止・削除できます。")
+            text("クリップボード履歴は初期OFFです。ONのときに入力中に取得できたコピーを、件数と期間を制限してバックアップ対象外の端末内領域へ保存します。秘密を完全には自動判別できません。「入力とサイズ」で停止・全削除できます。貼り付けや履歴を開くだけでは、削除済みのコピーを再登録しません。")
             text("アンインストールすると設定と辞書が消えます。更新はアンインストールせずに行ってください。")
         }
         section("利用技術と動作確認") {
@@ -406,7 +430,7 @@ class MainActivity : AppCompatActivity() {
             text("Mozcの公開辞書データを使う独自の変換処理です。Mozc本体ではなく、長文や固有名詞の変換には限界があります。Samsung実機・Bluetooth/USBの実接続は追加確認が必要です。")
             text("英語とカタカナの追加候補には、James William BREEN と EDRDG のJMdictを加工した辞書（CC BY-SA 4.0）を使用しています。複数の意味を持つ語では訳語を確認してください。")
             button("ライセンスを表示") {
-                val notices=listOf("NOTICE.txt","japanese/LICENSE-MOZC.txt","japanese/LICENSE-DICTIONARY.txt","japanese/LICENSE-UNICODE.txt","semantic/LICENSE-JMDICT.txt","semantic/LICENSE-CC-BY-SA-4.0.txt")
+                val notices=listOf("NOTICE.txt","japanese/LICENSE-MOZC.txt","japanese/LICENSE-DICTIONARY.txt","japanese/LICENSE-UNICODE.txt","semantic/LICENSE-JMDICT.txt","semantic/LICENSE-CC-BY-SA-4.0.txt","symbols/LICENSE")
                     .joinToString("\n\n") { name -> assets.open(name).bufferedReader().use { it.readText() } }
                 AlertDialog.Builder(this).setTitle("ライセンス・利用技術").setMessage(notices).setPositiveButton("閉じる",null).show()
             }
@@ -551,23 +575,28 @@ class MainActivity : AppCompatActivity() {
         } catch (e: CancellationException) { throw e }
         catch (_: Exception) { installWhenReady=false; updateStatus?.text="インストールを開始できませんでした。更新情報を再確認してください。"; toast("APKの検証またはインストールを開始できませんでした") }
     }
-    private fun addWord() {
+    private fun addWord(oldReading: String?=null,oldWord: String?=null) {
         val box=ui.column().apply { setPadding(dp(20),dp(8),dp(20),0) }
         val reading=EditText(this).apply { hint="よみ（ひらがな）" }; val word=EditText(this).apply { hint="単語" }
+        reading.setText(oldReading.orEmpty()); word.setText(oldWord.orEmpty())
         box.addView(reading); box.addView(word)
         val dialog=AlertDialog.Builder(this).setTitle("ユーザー辞書に追加").setView(box).setPositiveButton("追加",null).setNegativeButton("キャンセル",null).create()
         dialog.setOnShowListener { dialog.getButton(AlertDialog.BUTTON_POSITIVE).setOnClickListener {
             val r=reading.text.toString().trim(); val w=word.text.toString().trim()
             if (!r.matches(Regex("[ぁ-ゖー]{1,50}")) || w.isEmpty() || w.length>100) { toast("よみはひらがな50文字以内、単語は100文字以内で入力してください"); return@setOnClickListener }
-            lifecycleScope.launch { app.settings.addWord(r,w); dialog.dismiss(); selectPage(Page.CONVERSION) }
+            lifecycleScope.launch { if (oldReading!=null && oldWord!=null) app.settings.editWord(oldReading,oldWord,r,w) else app.settings.addWord(r,w); dialog.dismiss(); selectPage(Page.CONVERSION) }
         } }; dialog.show()
     }
     private fun dictionary() {
         val words=app.settings.state.value.dictionary
         if (words.isEmpty()) { toast("登録した単語はありません"); return }
-        val keys=words.keys.sorted()
-        AlertDialog.Builder(this).setTitle("削除する読みを選択").setItems(keys.map { "$it：${words[it]?.joinToString(" / ")}" }.toTypedArray()) { _,i ->
-            AlertDialog.Builder(this).setMessage("「${keys[i]}」の登録を削除しますか？").setPositiveButton("削除") { _,_ -> lifecycleScope.launch { app.settings.removeWord(keys[i]); selectPage(Page.CONVERSION) } }.setNegativeButton("戻る",null).show()
+        val entries=words.toSortedMap().flatMap { (reading,values) -> values.map { reading to it } }
+        AlertDialog.Builder(this).setTitle("編集する単語を選択").setItems(entries.map { "${it.first}：${it.second}" }.toTypedArray()) { _,i ->
+            val (reading,word)=entries[i]
+            AlertDialog.Builder(this).setMessage("$reading：$word")
+                .setPositiveButton("編集") { _,_ -> addWord(reading,word) }
+                .setNeutralButton("削除") { _,_ -> lifecycleScope.launch { app.settings.editWord(reading,word,"",""); selectPage(Page.CONVERSION) } }
+                .setNegativeButton("閉じる",null).show()
         }.setNegativeButton("閉じる",null).show()
     }
     override fun onRequestPermissionsResult(requestCode: Int,permissions: Array<out String>,grantResults: IntArray) {
