@@ -1,6 +1,28 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 13,
+    "versionName": "0.1.10",
+    "releaseDate": "2026-11-02",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.10/DualKeyIME-0.1.10.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "a30f3b2dde8834764567f8cbb111b89d6d7f3416c26aac4109efe2bfda30dbdd",
+    "sizeBytes": 101249772,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "通知から画面キーボードの表示／非表示を切り替える機能を追加",
+      "別の画面を開かず、元の入力欄を維持して切り替え",
+      "入力欄がない場合の選択を保存し、次の入力欄へフォーカスした際に反映",
+      "対応するAndroidで、完全非表示中のキーボード切替・下向き矢印のバーも非表示に",
+      "通常の画面キーボードへ戻すと標準の下部バーを復帰",
+      "通知の許可・ON／OFFと、下部バーの非表示を設定から変更可能に",
+      "PC風の候補は物理キー操作時だけに表示し、フリックの候補欄・一覧は維持",
+      "既存の設定・辞書・学習データ・カスタムショートカットとアプリ内更新を維持"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 12,
     "versionName": "0.1.9",
     "releaseDate": "2026-11-02",
