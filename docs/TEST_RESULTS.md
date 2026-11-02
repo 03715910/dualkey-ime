@@ -11,10 +11,11 @@
 - 表示／非表示を同じカスタムキーで交互に操作し、元の組合せや余分な修飾キー・長押しの繰り返しで誤動作しないこと、OFF設定、入力の再開始後の保持、未確定の「か」を隠した状態で「な」へ続けても重複しないことを確認しました。設定画面の手動選択・実キーでの登録・保存・キャンセル・初期値への復帰・画面再作成後の保持は端末テスト2件で成功しています。
 - 従来のフリック・数字行・英語QWERTY・Shift/Caps・漢字と文章変換・最大1,000件の候補と追加検索・変換と続きの学習・学習禁止欄・パスワード・カーソル・省スペース・オフライン入力・英語／カタカナへの切り替え・ML Kitの文章翻訳も同じ46項目に含まれます。
 - 署名Release・テストAPKの生成とRelease Lint 0エラー・35警告を確認しました（`hardware-final-build.log`）。テストAPKだけの修正・再ビルドは`hardware-test-harness-fixed-build.log`です。設定と学習DBの形式を維持し、カスタムショートカットの2項目だけをDataStoreへ追加しています。実画面は`output/hardware-0.1.9/hardware/`の`conversion-full.png`、`conversion-hidden.png`、`next-word-tab.png`で確認しました。
+- [0.1.9](https://github.com/03715910/dualkey-ime/releases/tag/v0.1.9)を実際に公開しました。[開発CI](https://github.com/03715910/dualkey-ime/actions/runs/41383994007)と[Pages公開](https://github.com/03715910/dualkey-ime/actions/runs/41384302609)は成功しています。通常URLのversion.jsonがcode 12を返し、新しい使い方とサイト資産がHTTP 200で取得できること、公開APK全体101,233,344バイトと上記SHA-256が一致することを確認しました（`hardware-public-release-verify.log`、`hardware-public-site-verify.log`）。アプリ自身が公開フィードを取得して0.1.9を最新版と認識する端末テスト1件も成功しています（`hardware-app-public-check.log`）。配布APKは`output/DualKeyIME-0.1.9.apk`です。
 
 候補用の高さ0のIMEホストを公式の表示要求で出し、その子ウィンドウへ候補を表示します。Android自身の下部ナビゲーション／キャプション領域は残るため、システム操作領域まで消えるとは報告しません。[物理候補と制約](HARDWARE_CANDIDATES.md)に記録しています。スマホの新しい常設操作は追加しておらず、[タップ操作の3案](TOUCH_VISIBILITY_OPTIONS.md)は検討案です。
 
-Samsung実機・実物のBluetooth/USB接続・API26～30の配置・他社エディターや画面回転を含む実機確認・Android標準インストーラーでの更新完了は未実施です。公開サイトと実際の更新フィードの確認は、このローカル検証とは別に実施します。
+Samsung実機・実物のBluetooth/USB接続・API26～30の配置・他社エディターや画面回転を含む実機確認・Android標準インストーラーでの更新完了は未実施です。
 
 ## 0.1.8：確定後の続きの言葉と組合せの学習
 
