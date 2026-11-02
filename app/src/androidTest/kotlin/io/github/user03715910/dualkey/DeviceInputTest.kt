@@ -578,9 +578,21 @@ class DeviceInputTest {
     @Test fun sideArrowsSelectCandidatesAndMoveTheCursor() {
         letters("KYOU"); key(KeyEvent.KEYCODE_SPACE); assertEquals("今日",inputText())
         touch(rect("▶")); assertNotEquals("今日",inputText())
+        assertNull("Touch controls leave the PC candidate panel",hardwareNode("物理キーボードの候補一覧"))
         touch(rect("◀")); assertEquals("今日",inputText())
         touch(rect("↵")); touch(rect("◀")); touch(rect("あ行")); touch(rect("↵"))
         await("cursor insertion") { inputText()=="今あ日" }
+    }
+    @Test fun flickConversionKeepsTheInlineCandidatesInsteadOfThePcPanel() {
+        touch(rect("あ行")); assertEquals("あ",inputText())
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        touch(rect("空白")); touch(rect("▶"))
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        assertNotNull(findNode { it.text?.toString()=="一覧" })
+        touch(rect("一覧"))
+        assertNotNull(findNode { it.text?.toString()=="閉じる" })
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        captureHardware("touch-candidates-only")
     }
     @Test fun bottomRowHandlesSmallVoicedKanaAndPunctuation() {
         touch(rect("か行")); touch(rect("小゛゜"))
