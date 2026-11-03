@@ -1,6 +1,25 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 15,
+    "versionName": "0.1.12",
+    "releaseDate": "2026-11-03",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.12/DualKeyIME-0.1.12.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "54a8afbd06216bfdfb18aea8ed9f4c73cedb85b31a4796971b75a5bd83db4dad",
+    "sizeBytes": 101719955,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "英語フリックの@をABCの左に移動し、空白の重複を解消。下段から句読点をフリック入力可能に",
+      "英語フリックのShiftで1文字大文字・大文字固定・解除の状態を表示",
+      "「てん」「てんてんてん」「おんぷ」など、読みから入力できる記号を追加",
+      "日英の予測候補に絵文字・顔文字を追加し、設定で個別に切り替え可能に",
+      "対応する入力欄へ画像・GIF・動画を貼り付け可能に。履歴ON時は最近貼り付けたメディアを一時表示"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 14,
     "versionName": "0.1.11",
     "releaseDate": "2026-11-02",
