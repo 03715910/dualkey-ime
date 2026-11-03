@@ -36,17 +36,16 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         layoutParams=LinearLayout.LayoutParams(-1,dp(38))
         visibility=View.GONE
     }.also { root.addView(it,root.indexOfChild(expandedScroll)+1) }
-    private val clipboardPreview=LinearLayout(context).apply {
-        layoutParams=LinearLayout.LayoutParams(-1,dp(40))
-        visibility=View.GONE
-    }.also { root.addView(it,root.indexOfChild(toolbar)+1) }
     private val candidateScroll=root.findViewById<View>(R.id.candidate_scroll)
-    private val screenshotPreview=LinearLayout(context).apply {
+    private val candidateContent=root.findViewById<android.widget.FrameLayout>(R.id.candidate_content)
+    private val clipboardPreview=previewContainer()
+    private val screenshotPreview=previewContainer()
+    private fun previewContainer() = LinearLayout(context).apply {
         gravity=Gravity.CENTER_VERTICAL
         layoutParams=android.widget.FrameLayout.LayoutParams(-2,-1,Gravity.CENTER)
         visibility=View.GONE
-    }.also { root.findViewById<android.widget.FrameLayout>(R.id.candidate_content).addView(it) }
-    private var hasScreenshotPreview=false
+        candidateContent.addView(this)
+    }
     private var composingReading=""
     private var candidateExpanded = false
     private var previousCandidates=emptyList<String>()
@@ -70,10 +69,14 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         keys.visibility=if (showKeys && !translating && !candidateExpanded) View.VISIBLE else View.GONE
         expandedScroll.visibility=if (candidateExpanded && !translating) View.VISIBLE else View.GONE
         candidateTabs.visibility=expandedScroll.visibility
-        val showScreenshot=hasScreenshotPreview && composingReading.isEmpty() && !candidateExpanded && !translating && googleText==null
+        val canShowPreview=composingReading.isEmpty() && !candidateExpanded && !translating && googleText==null
+        val showScreenshot=canShowPreview && screenshotPreview.childCount>0
+        val showClipboard=canShowPreview && !showScreenshot && clipboardPreview.childCount>0
         screenshotPreview.visibility=if (showScreenshot) View.VISIBLE else View.GONE
-        candidateScroll.visibility=if (showScreenshot) View.INVISIBLE else View.VISIBLE
-        candidateExpand.visibility=if (!showScreenshot && googleText==null && (previousCandidates.isNotEmpty() || candidateExpanded)) View.VISIBLE else View.GONE
+        clipboardPreview.visibility=if (showClipboard) View.VISIBLE else View.GONE
+        val showPreview=showScreenshot || showClipboard
+        candidateScroll.visibility=if (showPreview) View.INVISIBLE else View.VISIBLE
+        candidateExpand.visibility=if (!showPreview && googleText==null && (previousCandidates.isNotEmpty() || candidateExpanded)) View.VISIBLE else View.GONE
         candidateExpand.text=if (candidateExpanded) "閉じる" else "一覧"
         candidateExpand.contentDescription=if (candidateExpanded) "変換候補の一覧を閉じる" else "変換候補を一覧表示"
         if (googleText!=null) {
@@ -341,27 +344,29 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     fun showClipboardPreview(bitmap: android.graphics.Bitmap?,label: String?,paste: ()->Unit = {},dismiss: ()->Unit = {},screenshot: Boolean=false) {
         val clipboardPreview=if (screenshot) screenshotPreview else this.clipboardPreview
         clipboardPreview.removeAllViews()
-        if (screenshot) {
-            hasScreenshotPreview=label!=null
+        if (label==null) {
             updateBody()
-        } else clipboardPreview.visibility=if (label==null) View.GONE else View.VISIBLE
-        if (label==null) return
+            return
+        }
         if (bitmap!=null) clipboardPreview.addView(ImageView(context).apply {
-            layoutParams=LinearLayout.LayoutParams(dp(if (screenshot) 26 else 44),-1)
+            layoutParams=LinearLayout.LayoutParams(dp(26),-1)
             scaleType=ImageView.ScaleType.FIT_CENTER
             setImageBitmap(bitmap)
             contentDescription=if (screenshot) "撮ったスクショのプレビュー" else "コピーしたメディアのプレビュー"
             setOnClickListener { paste() }
         })
         clipboardPreview.addView(button(label,"noop",small=true).apply {
-            layoutParams=if (screenshot) LinearLayout.LayoutParams(dp(155),-1) else LinearLayout.LayoutParams(0,-1,1f)
+            layoutParams=LinearLayout.LayoutParams(dp(if (screenshot) 155 else 180),-1)
+            setSingleLine(true)
+            ellipsize=android.text.TextUtils.TruncateAt.END
             setOnClickListener { paste() }
         })
         clipboardPreview.addView(button("×","noop",small=true).apply {
-            layoutParams=LinearLayout.LayoutParams(dp(if (screenshot) 32 else 44),-1)
+            layoutParams=LinearLayout.LayoutParams(dp(32),-1)
             contentDescription=if (screenshot) "スクショのプレビューを閉じる" else "コピープレビューを閉じる"
             setOnClickListener { dismiss() }
         })
+        updateBody()
     }
     internal fun showClipboard(entries: List<io.github.user03715910.dualkey.data.ClipboardEntry>,enabled: Boolean,
         paste: (io.github.user03715910.dualkey.data.ClipboardEntry)->Unit,remove: (io.github.user03715910.dualkey.data.ClipboardEntry)->Unit,clear: ()->Unit,close: ()->Unit,
