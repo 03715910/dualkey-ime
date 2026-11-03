@@ -54,6 +54,9 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private data class EditorKey(val packageName: String?,val fieldId: Int,val type: Int,val options: Int)
     private var editorKey: EditorKey?=null
     private data class RotationComposition(val editor: EditorKey,val text: String,val end: Int,val expires: Long)
+    // A second framework restart can arrive several seconds after the configuration callback.
+    // Restoration still requires the same editor, cursor, and owned text.
+    private val rotationRestoreWindow=6_000L
     private var rotationComposition: RotationComposition?=null
     private var composingEnd: Int?=null
     private var compositionRestoreJob: Job?=null
@@ -231,7 +234,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val same=restarting && inputStarted && editorKey==key
         val rotation=rotationComposition?.takeIf { same && it.editor==key && it.expires>=SystemClock.uptimeMillis() }
         val before=if (same && !changingConfiguration && rotation==null && owned.isNotEmpty()) runCatching {
-            currentInputConnection?.getTextBeforeCursor(maxOf(owned.length,rotation?.text?.length ?: 0),0)?.toString()
+            currentInputConnection?.getTextBeforeCursor(owned.length,0)?.toString()
         }.getOrNull() else null
         val preserve=restarting && inputStarted && editorKey==key &&
             // The framework restarts the same connection during configuration changes.
@@ -320,7 +323,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val key=editorKey; val end=composingEnd
         if (hasEditor() && !sensitive && owned.isNotEmpty() && key!=null && end!=null && end>=owned.length &&
             (rotationComposition?.expires ?: 0)<SystemClock.uptimeMillis()) {
-            rotationComposition=RotationComposition(key,owned,end,SystemClock.uptimeMillis()+2000)
+            rotationComposition=RotationComposition(key,owned,end,SystemClock.uptimeMillis()+rotationRestoreWindow)
         }
         changingConfiguration=true
         try {
@@ -650,7 +653,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         compositionRestoreJob?.cancel()
         compositionRestoreJob=scope.launch {
             // The client's replacement connection may not yet accept commands inside onStartInput.
-            for (wait in listOf(16L,32L,64L,128L,256L,350L)) {
+            for (wait in listOf(16L,32L,64L,128L,256L,350L,500L,750L)) {
                 delay(wait)
                 if (session!=editorSession || !hasEditor() || editorKey!=origin.editor || sensitive) return@launch
                 if (SystemClock.uptimeMillis()>origin.expires) { clearState(); return@launch }
@@ -843,6 +846,13 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                         mediaHistory=mediaHistory.map { if (it.media==media) it.copy(preview=bitmap) else it }
                         if (clipboardShowing) clipboardHistory()
                     }
+                    scope.launch {
+                        delay((media.expires-System.currentTimeMillis()).coerceAtLeast(0L))
+                        if (mediaHistory.any { it.media==media }) {
+                            mediaHistory=mediaHistory.filterNot { it.media==media }
+                            if (clipboardShowing) clipboardHistory()
+                        }
+                    }
                 }
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { if (current()) clipboardMessage("メディアを読み取れないか、容量上限（1件32 MiB）を超えています。アプリから添付してください") }
@@ -890,8 +900,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             { clearMediaHistory(); app.clipboard.clear(); clipboardHistory() },
             { clipboardShowing=false; ui?.hideTranslation() },
             currentMedia(),
-            { entry -> if (entry in currentMedia()) sendMedia(entry.media) },
-            { entry -> mediaHistory=mediaHistory.filterNot { it==entry }; app.clipboardMedia.discard(entry.media); clipboardHistory() })
+            { entry -> if (currentMedia().any { it.media==entry.media }) sendMedia(entry.media) },
+            { entry -> mediaHistory=mediaHistory.filterNot { it.media==entry.media }; app.clipboardMedia.discard(entry.media); clipboardHistory() })
     }
     private fun moveCursor(step: Int) {
         invalidateTranslation()
