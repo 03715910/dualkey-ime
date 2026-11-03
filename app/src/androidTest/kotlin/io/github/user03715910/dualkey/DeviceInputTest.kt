@@ -160,17 +160,7 @@ class DeviceInputTest {
         touch(rect("ABC")); touch(rect("abc"))
         clickLabel("Shift：小文字"); SystemClock.sleep(ViewConfiguration.getDoubleTapTimeout()+80L)
         clickLabel("Shift：次の1文字を大文字"); touch(rect("abc"))
-        val shiftKey=rect("Shift：小文字")
-        repeat(2) {
-            val now=SystemClock.uptimeMillis()
-            for (action in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
-                val e=MotionEvent.obtain(now,SystemClock.uptimeMillis(),action,shiftKey.exactCenterX(),shiftKey.exactCenterY(),0)
-                e.source=InputDevice.SOURCE_TOUCHSCREEN
-                try { assertTrue(instrumentation.uiAutomation.injectInputEvent(e,false)) } finally { e.recycle() }
-            }
-            if (it==0) SystemClock.sleep(85)
-        }
-        await("caps lock after two quick taps") { findNode { it.contentDescription?.toString()=="Shift：大文字固定" }!=null }
+        doubleTapShift()
         touch(rect("ABC")); touch(rect("DEF")); clickLabel("Shift：大文字固定"); touch(rect("abc"))
         assertEquals("@.?AaaADa",inputText())
     }
@@ -364,6 +354,20 @@ class DeviceInputTest {
         if (dx!=0 || dy!=0) inject(MotionEvent.ACTION_MOVE,x+dx,y+dy,now+30)
         inject(MotionEvent.ACTION_UP,x+dx,y+dy,now+60)
         instrumentation.waitForIdleSync()
+    }
+    private fun doubleTapShift() {
+        val bounds=rect("Shift：小文字")
+        // Do not wait for the whole IME to become idle between the two taps.
+        repeat(2) {
+            val now=SystemClock.uptimeMillis()
+            for (action in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
+                val e=MotionEvent.obtain(now,SystemClock.uptimeMillis(),action,bounds.exactCenterX(),bounds.exactCenterY(),0)
+                e.source=InputDevice.SOURCE_TOUCHSCREEN
+                try { assertTrue(instrumentation.uiAutomation.injectInputEvent(e,false)) } finally { e.recycle() }
+            }
+            if (it==0) SystemClock.sleep(85)
+        }
+        await("caps lock after two quick taps") { findNode { it.contentDescription?.toString()=="Shift：大文字固定" }!=null }
     }
     private fun clickLabel(text: String) {
         // Translation changes the IME window height. Use the native accessibility action
@@ -943,7 +947,7 @@ class DeviceInputTest {
     @Test fun englishQwertyAndShiftCapsLock() {
         touch(rect("英語に切り替え")); touch(rect("h")); touch(rect("e")); touch(rect("l")); assertEquals("hel",inputText())
         touch(rect("⇧")); touch(rect("A")); touch(rect("b")); assertEquals("helAb",inputText())
-        val shift=rect("⇧"); touch(shift); touch(shift)
+        doubleTapShift()
         touch(rect("C")); touch(rect("D")); assertEquals("helAbCD",inputText())
         touch(rect("⇪")); touch(rect("e")); assertEquals("helAbCDe",inputText())
     }
