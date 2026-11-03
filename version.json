@@ -1,16 +1,15 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 17,
-  "versionName": "0.1.14",
+  "versionCode": 18,
+  "versionName": "0.1.15",
   "releaseDate": "2026-11-03",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.14/DualKeyIME-0.1.14.apk",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.15/DualKeyIME-0.1.15.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "46d218e6ec3e50d3fee687ccf96bf524e5e934d4f67db6e1a4cbd7807068b3ea",
+  "sha256": "2ec98248096a266b612c514f7a457c4fdbb30160d48259cde4a6c8867a35653c",
   "sizeBytes": 101736683,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "「撮ったスクショを候補に出す」を追加。写真へのアクセスを許可すると、コピー操作をせずに保存直後のスクショをキーボードから貼り付けられます。",
-    "設定の「入力とサイズ」→「貼り付けと履歴」から有効にできます。Android 10以降の画像貼り付け対応欄で利用できます。"
+    "Googleなどの検索欄で、入力先が予測候補を不要と指定した場合も、入力中のひらがなを漢字に変換できるようにしました。"
   ]
 }

@@ -1,6 +1,21 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 18,
+    "versionName": "0.1.15",
+    "releaseDate": "2026-11-03",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.15/DualKeyIME-0.1.15.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "2ec98248096a266b612c514f7a457c4fdbb30160d48259cde4a6c8867a35653c",
+    "sizeBytes": 101736683,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "Googleなどの検索欄で、入力先が予測候補を不要と指定した場合も、入力中のひらがなを漢字に変換できるようにしました。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 17,
     "versionName": "0.1.14",
     "releaseDate": "2026-11-03",
