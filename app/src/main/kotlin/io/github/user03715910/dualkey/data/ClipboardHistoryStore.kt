@@ -23,6 +23,8 @@ class ClipboardHistoryStore(context: Context,private val scope: CoroutineScope,p
     private val loaded=CompletableDeferred<Unit>()
     private val snapshot=MutableStateFlow<List<ClipboardEntry>>(emptyList())
     val state=snapshot.asStateFlow()
+    private val clears=MutableStateFlow(0L)
+    val clearEvents=clears.asStateFlow()
     fun current(): List<ClipboardEntry> = if (!settings.state.value.clipboardHistory) emptyList() else snapshot.value
         .filter { System.currentTimeMillis()-it.time in 0..86_400_000L }.take(settings.state.value.clipboardLimit)
     fun prune() { scope.launch(Dispatchers.IO) { loaded.await(); mutex.withLock { snapshot.value=current(); runCatching { persist() } } } }
@@ -74,6 +76,7 @@ class ClipboardHistoryStore(context: Context,private val scope: CoroutineScope,p
     } } }
     fun clear() {
         epoch++
+        clears.value=epoch
         scope.launch(Dispatchers.IO) { loaded.await(); mutex.withLock { snapshot.value=emptyList(); file.delete() } }
     }
 }

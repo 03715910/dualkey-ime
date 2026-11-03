@@ -21,10 +21,12 @@ class DualKeyApp : Application() {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     lateinit var settings: SettingsStore; private set
     val updates by lazy { UpdateRepository(this) }
+    val clipboardMedia by lazy { io.github.user03715910.dualkey.data.ClipboardMedia(this,scope) }
     lateinit var japaneseDictionary: JapaneseDictionary; private set
     lateinit var semanticDictionary: SemanticDictionary; private set
     lateinit var learning: LearningStore; private set
     lateinit var symbols: io.github.user03715910.dualkey.conversion.SymbolDictionary; private set
+    lateinit var expressions: io.github.user03715910.dualkey.conversion.ExpressionDictionary; private set
     lateinit var clipboard: io.github.user03715910.dualkey.data.ClipboardHistoryStore; private set
     override fun onCreate() {
         super.onCreate()
@@ -33,7 +35,9 @@ class DualKeyApp : Application() {
         japaneseDictionary = JapaneseDictionary(this, scope) { settings.state.value.dictionary }
         semanticDictionary = SemanticDictionary(this,scope)
         symbols=io.github.user03715910.dualkey.conversion.SymbolDictionary(this,scope)
+        expressions=io.github.user03715910.dualkey.conversion.ExpressionDictionary(this,scope)
         clipboard=io.github.user03715910.dualkey.data.ClipboardHistoryStore(this,scope,settings)
+        clipboardMedia // remove expired staging from an earlier process
         scope.launch { settings.awaitLoaded(); settings.state.map { it.autoCheck }.distinctUntilChanged().collect { UpdateScheduler.schedule(this@DualKeyApp, it) } }
         scope.launch {
             settings.awaitLoaded()

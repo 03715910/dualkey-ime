@@ -9,7 +9,8 @@ import androidx.appcompat.widget.AppCompatTextView
 import kotlin.math.abs
 
 class FlickKey(context: Context, private val values: List<String>, private val threshold: Float,
-    private val feedback: (View) -> Unit, private val input: (String) -> Unit, private val previewEnabled: Boolean = true) : AppCompatTextView(context) {
+    private val feedback: (View) -> Unit, private val input: (String) -> Unit, private val previewEnabled: Boolean = true,
+    label: String = values[0], description: String = "${values[0]}行") : AppCompatTextView(context) {
     private var downX = 0f
     private var downY = 0f
     private var direction = 0
@@ -18,13 +19,14 @@ class FlickKey(context: Context, private val values: List<String>, private val t
     private var preview: FlickPreviewBubble? = null
     init {
         // Keep the resting key legible and compact; directions appear while touching.
-        text = values[0]
+        text = label
         textSize = 22f
         includeFontPadding = false
         setSingleLine(true)
         gravity = Gravity.CENTER
         isClickable = true
-        contentDescription = "${values[0]}行。左${values[1]}、上${values[2]}、右${values[3]}、下${values[4]}"
+        contentDescription = (listOf(description) + listOf("左","上","右","下").zip(values.drop(1))
+            .filter { it.second.isNotEmpty() }.map { (name,value) -> "$name$value" }).joinToString("。")
     }
     override fun onTouchEvent(event: MotionEvent): Boolean {
         when (event.actionMasked) {
@@ -63,11 +65,10 @@ class FlickKey(context: Context, private val values: List<String>, private val t
             MotionEvent.ACTION_MOVE -> {
                 val index = event.findPointerIndex(activePointer)
                 if (index < 0) return true
-                val dx = event.getX(index)-downX; val dy = event.getY(index)-downY
-                val next = if (maxOf(abs(dx), abs(dy)) < threshold) 0 else if (abs(dx)>abs(dy)) { if (dx<0) 1 else 3 } else { if (dy<0) 2 else 4 }
+                val next = directionAt(event.getX(index),event.getY(index))
                 if (next != direction) { direction = next; updatePreview() }
             }
-            MotionEvent.ACTION_UP -> { if (activePointer<0) return true; popup?.dismiss(); popup = null; preview=null; isPressed = false; performClick(); direction = 0; activePointer = -1 }
+            MotionEvent.ACTION_UP -> { if (activePointer<0) return true; direction=directionAt(event.x,event.y); popup?.dismiss(); popup = null; preview=null; isPressed = false; performClick(); direction = 0; activePointer = -1 }
             MotionEvent.ACTION_CANCEL -> { popup?.dismiss(); popup = null; preview=null; isPressed = false; direction = 0; activePointer = -1 }
             MotionEvent.ACTION_POINTER_UP -> if (event.getPointerId(event.actionIndex)==activePointer) {
                 popup?.dismiss(); popup=null; preview=null; isPressed=false; direction=0; activePointer=-1
@@ -76,6 +77,11 @@ class FlickKey(context: Context, private val values: List<String>, private val t
         return true
     }
     private fun updatePreview() { preview?.select(direction) }
+    private fun directionAt(x: Float,y: Float): Int {
+        val dx=x-downX; val dy=y-downY
+        return if (maxOf(abs(dx),abs(dy))<threshold) 0
+            else if (abs(dx)>abs(dy)) { if (dx<0) 1 else 3 } else { if (dy<0) 2 else 4 }
+    }
     override fun performClick(): Boolean { super.performClick(); values[direction].takeIf { it.isNotEmpty() }?.let(input); return true }
     override fun onDetachedFromWindow() { popup?.dismiss(); popup = null; preview=null; super.onDetachedFromWindow() }
 }

@@ -273,6 +273,7 @@ class MainActivity : AppCompatActivity() {
         }
         section("貼り付けと履歴") {
             toggle("クリップボード履歴を保存",Prefs.clipboardHistory,s.clipboardHistory)
+            text("画像・GIF・動画は貼り付け操作でのみ読み込みます。履歴ON時は貼り付けたメディアを最大10分表示します。")
             slider("履歴の最大件数",Prefs.clipboardLimit,s.clipboardLimit,5,100)
             text("初期状態はOFFです。ONにすると、DualKeyの通常入力中に取得できた文字列を端末内だけに保存します。履歴は読込・表示時に24時間以内へ整理します。OFFにすると保存済み履歴も削除します。")
             text("機密フラグ付きのコピー、パスワード・学習禁止欄、メール・URL・長い数字列などは履歴へ保存しません。機密と通知されない文章を完全に判別することはできないため、秘密の文章を扱うときはOFFにしてください。通常の貼り付けは履歴OFFでも使えます。")
@@ -345,6 +346,8 @@ class MainActivity : AppCompatActivity() {
         heading("変換と辞書","候補の表示と、よく使う単語を管理。")
         section("予測候補") {
             toggle("日本語の予測候補",Prefs.japanesePrediction,s.japanesePrediction)
+            toggle("絵文字の候補",Prefs.emojiPrediction,s.emojiPrediction)
+            toggle("顔文字の候補",Prefs.facePrediction,s.facePrediction)
             toggle("英語の予測候補",Prefs.englishPrediction,s.englishPrediction)
             slider("最初に検索する候補数",Prefs.candidateCount,maxOf(64,s.candidateCount),64,1000)
             text("最初の候補は64件以上です。「一覧」はスクロールで続きを自動追加します。検索できる候補は最大10,000件です。")
@@ -430,7 +433,7 @@ class MainActivity : AppCompatActivity() {
             text("Mozcの公開辞書データを使う独自の変換処理です。Mozc本体ではなく、長文や固有名詞の変換には限界があります。Samsung実機・Bluetooth/USBの実接続は追加確認が必要です。")
             text("英語とカタカナの追加候補には、James William BREEN と EDRDG のJMdictを加工した辞書（CC BY-SA 4.0）を使用しています。複数の意味を持つ語では訳語を確認してください。")
             button("ライセンスを表示") {
-                val notices=listOf("NOTICE.txt","japanese/LICENSE-MOZC.txt","japanese/LICENSE-DICTIONARY.txt","japanese/LICENSE-UNICODE.txt","semantic/LICENSE-JMDICT.txt","semantic/LICENSE-CC-BY-SA-4.0.txt","symbols/LICENSE")
+                val notices=listOf("NOTICE.txt","japanese/LICENSE-MOZC.txt","japanese/LICENSE-DICTIONARY.txt","japanese/LICENSE-UNICODE.txt","semantic/LICENSE-JMDICT.txt","semantic/LICENSE-CC-BY-SA-4.0.txt","symbols/LICENSE","expressions/LICENSE-CLDR.txt")
                     .joinToString("\n\n") { name -> assets.open(name).bufferedReader().use { it.readText() } }
                 AlertDialog.Builder(this).setTitle("ライセンス・利用技術").setMessage(notices).setPositiveButton("閉じる",null).show()
             }

@@ -13,6 +13,10 @@ import android.text.InputType;
 import android.util.Rational;
 import android.view.*;
 import android.view.inputmethod.InputMethodManager;
+import android.view.inputmethod.EditorInfo;
+import android.view.inputmethod.InputConnection;
+import android.view.inputmethod.InputConnectionWrapper;
+import android.view.inputmethod.InputContentInfo;
 import android.widget.*;
 import java.io.*;
 import java.lang.ref.WeakReference;
@@ -29,6 +33,8 @@ public class LifecycleFixtureActivity extends Activity {
     private TextView state;
     private boolean playing;
     private int imeInset;
+    private volatile String received="none";
+    private volatile byte[] expectedMedia;
     @Override public void onCreate(Bundle saved) {
         super.onCreate(saved); current=new WeakReference<>(this);
         // Use one inset strategy. adjustResize plus IME padding would hide the test editor twice.
@@ -51,7 +57,29 @@ public class LifecycleFixtureActivity extends Activity {
         video=new VideoView(this); video.setContentDescription("fixture-video"); video.setFocusable(false);
         root.addView(video,new FrameLayout.LayoutParams(-1,-1));
         root.addView(header,new FrameLayout.LayoutParams(-1,dp(56),Gravity.TOP));
-        editor=new EditText(this); editor.setSingleLine(false); editor.setTextSize(16);
+        editor=new EditText(this) {
+            @Override public InputConnection onCreateInputConnection(EditorInfo info) {
+                InputConnection base=super.onCreateInputConnection(info);
+                String mode=getIntent().getStringExtra("media");
+                if (base==null || mode==null) return base;
+                info.contentMimeTypes=mode.equals("images")?new String[]{"image/*"}:new String[]{"image/*","video/mp4"};
+                return new InputConnectionWrapper(base,false) {
+                    @Override public boolean commitContent(InputContentInfo value,int flags,Bundle opts) {
+                        if ((flags&InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION)==0) { received="missing-grant"; return false; }
+                        try { value.requestPermission(); } catch (Exception e) { received="grant-error"; return false; }
+                        byte[] expected=expectedMedia;
+                        new Thread(()->{
+                            try (InputStream input=getContentResolver().openInputStream(value.getContentUri())) {
+                                byte[] bytes=readBytes(input);
+                                received=value.getDescription().getMimeType(0)+"; match="+java.util.Arrays.equals(expected,bytes);
+                            } catch (Exception e) { received="read-error"; }
+                            finally { value.releasePermission(); }
+                        },"test-receive-media").start();
+                        return true;
+                    }
+                };
+            }
+        }; editor.setSingleLine(false); editor.setTextSize(16);
         editor.setId(View.generateViewId()); editor.setFocusableInTouchMode(true);
         editor.setContentDescription("fixture-editor");
         editor.setInputType(InputType.TYPE_CLASS_TEXT|InputType.TYPE_TEXT_FLAG_MULTI_LINE);
@@ -90,6 +118,8 @@ public class LifecycleFixtureActivity extends Activity {
         editor.post(()->{ editor.requestFocus(); getSystemService(InputMethodManager.class).showSoftInput(editor,0); updateState(); });
     }
     private void command(String value) {
+        if (value.startsWith("copy-")) { copyMedia(value.substring(5)); return; }
+        if (value.equals("reset-media")) { received="none"; return; }
         switch(value) {
             case "edit": beginInput(); break;
             case "end-input": endInput(); break;
@@ -100,6 +130,35 @@ public class LifecycleFixtureActivity extends Activity {
             case "pip": enterPictureInPictureMode(new PictureInPictureParams.Builder().setAspectRatio(new Rational(16,9)).build()); break;
             default: finishAndRemoveTask();
         }
+    }
+    private static byte[] readBytes(InputStream input) throws IOException {
+        ByteArrayOutputStream data=new ByteArrayOutputStream();
+        byte[] buffer=new byte[8192]; int n;
+        while ((n=input.read(buffer))!=-1) { data.write(buffer,0,n); if (data.size()>2*1024*1024) throw new IOException("fixture size"); }
+        return data.toByteArray();
+    }
+    private void copyMedia(String name) {
+        try {
+            if (TestMediaProvider.mime(name)==null) return;
+            File file=new File(getCacheDir(),name);
+            if (!name.equals("lifecycle-video.mp4")) {
+                try (OutputStream output=new FileOutputStream(file)) {
+                    if (name.endsWith(".gif")) output.write(android.util.Base64.decode("R0lGODlhAQABAIAAAAAAAP///yH5BAEAAAAALAAAAAABAAEAAAIBRAA7",0));
+                    else {
+                        android.graphics.Bitmap bitmap=android.graphics.Bitmap.createBitmap(160,90,android.graphics.Bitmap.Config.ARGB_8888);
+                        android.graphics.Canvas canvas=new android.graphics.Canvas(bitmap);
+                        canvas.scale(160f/Math.max(1,root.getWidth()),90f/Math.max(1,root.getHeight())); root.draw(canvas);
+                        android.graphics.Bitmap.CompressFormat format=name.endsWith(".jpeg")?android.graphics.Bitmap.CompressFormat.JPEG:
+                            name.endsWith(".webp")?android.graphics.Bitmap.CompressFormat.WEBP:android.graphics.Bitmap.CompressFormat.PNG;
+                        bitmap.compress(format,90,output); bitmap.recycle();
+                    }
+                }
+            }
+            try (InputStream input=new FileInputStream(file)) { expectedMedia=readBytes(input); }
+            received="none";
+            getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newUri(getContentResolver(),"test media",
+                Uri.parse("content://"+getPackageName()+".test-media/"+name)));
+        } catch (Exception e) { received="copy-error"; }
     }
     private void bars(boolean show) {
         if (Build.VERSION.SDK_INT>=30 && getWindow().getInsetsController()!=null) {
@@ -123,6 +182,7 @@ public class LifecycleFixtureActivity extends Activity {
         // This synthetic editor lives only in the test APK, not in the production IME.
         out.println("FixtureText64: "+android.util.Base64.encodeToString(editor.getText().toString().getBytes(java.nio.charset.StandardCharsets.UTF_8),android.util.Base64.NO_WRAP));
         out.println("FixtureFocus: "+editor.hasFocus());
+        out.println("FixtureMedia: "+received);
     }
     @Override public void onDestroy() {
         video.stopPlayback(); if (current.get()==this) current.clear(); super.onDestroy();
@@ -131,6 +191,29 @@ public class LifecycleFixtureActivity extends Activity {
         @Override public void onReceive(Context context,Intent intent) {
             LifecycleFixtureActivity a=current.get(); if (a!=null) a.command(intent.getStringExtra("command")==null?"close":intent.getStringExtra("command"));
         }
+    }
+    public static class TestMediaProvider extends ContentProvider {
+        static String mime(String name) {
+            if (name==null) return null;
+            switch(name) {
+                case "test.png": return "image/png";
+                case "test.jpeg": return "image/jpeg";
+                case "test.webp": return "image/webp";
+                case "test.gif": return "image/gif";
+                case "lifecycle-video.mp4": return "video/mp4";
+                default: return null;
+            }
+        }
+        @Override public boolean onCreate() { return true; }
+        @Override public String getType(Uri uri) { return mime(uri.getLastPathSegment()); }
+        @Override public ParcelFileDescriptor openFile(Uri uri,String mode) throws FileNotFoundException {
+            if (!mode.equals("r") || getType(uri)==null) throw new FileNotFoundException();
+            return ParcelFileDescriptor.open(new File(getContext().getCacheDir(),uri.getLastPathSegment()),ParcelFileDescriptor.MODE_READ_ONLY);
+        }
+        @Override public android.database.Cursor query(Uri u,String[] p,String s,String[] a,String o) { return null; }
+        @Override public Uri insert(Uri u,ContentValues v) { throw new UnsupportedOperationException(); }
+        @Override public int update(Uri u,ContentValues v,String s,String[] a) { throw new UnsupportedOperationException(); }
+        @Override public int delete(Uri u,String s,String[] a) { throw new UnsupportedOperationException(); }
     }
     /** Generate our own two-second moving grayscale video; no network or copyrighted media. */
     private static synchronized File clip(File directory) throws Exception {

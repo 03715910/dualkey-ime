@@ -147,6 +147,59 @@ class DeviceInputTest {
         assertEquals("きょbにほんご",inputText())
         captureHardware("japanese-qwerty")
     }
+    @Test fun englishFlickPositionsAndAllShiftStates() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.englishLayout,"FLICK"); app.settings.state.first { it.englishFlick } }
+        touch(rect("英語に切り替え"))
+        assertNull(findNode { it.text?.toString()=="Space" })
+        assertTrue(rect("アットマーク").right<=rect("abc").left)
+        touch(rect("アットマーク")); val punctuation=rect("句読点")
+        touch(punctuation); touch(punctuation,dy=-(punctuation.height()*0.8).toInt())
+        assertEquals("@.?",inputText())
+        clickLabel("Shift：小文字"); assertNotNull(findNode { it.text?.toString()=="ABC" })
+        touch(rect("ABC")); touch(rect("abc"))
+        clickLabel("Shift：小文字"); SystemClock.sleep(ViewConfiguration.getDoubleTapTimeout()+80L)
+        clickLabel("Shift：次の1文字を大文字"); touch(rect("abc"))
+        val shiftKey=rect("Shift：小文字")
+        repeat(2) {
+            val now=SystemClock.uptimeMillis()
+            for (action in listOf(MotionEvent.ACTION_DOWN,MotionEvent.ACTION_UP)) {
+                val e=MotionEvent.obtain(now,SystemClock.uptimeMillis(),action,shiftKey.exactCenterX(),shiftKey.exactCenterY(),0)
+                e.source=InputDevice.SOURCE_TOUCHSCREEN
+                try { assertTrue(instrumentation.uiAutomation.injectInputEvent(e,false)) } finally { e.recycle() }
+            }
+            if (it==0) SystemClock.sleep(85)
+        }
+        await("caps lock after two quick taps") { findNode { it.contentDescription?.toString()=="Shift：大文字固定" }!=null }
+        touch(rect("ABC")); touch(rect("DEF")); clickLabel("Shift：大文字固定"); touch(rect("abc"))
+        assertEquals("@.?AaaADa",inputText())
+    }
+    @Test fun japanesePunctuationAliasesAndExpressionsAreSelectable() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { withTimeout(10_000) { app.expressions.entries.first { it.symbols.isNotEmpty() } }
+            app.settings.set(Prefs.emojiPrediction,true); app.settings.set(Prefs.facePrediction,true) }
+        fun pick(reading: String,answer: String,also: String?=null) {
+            letters(reading); touch(rect("空白")); touch(rect("一覧"))
+            if (also!=null) assertNotNull(gridCandidate { it.substringAfter('：')==also })
+            val item=gridCandidate { it.substringAfter('：')==answer } ?: error("Missing candidate: $answer")
+            assertTrue(item.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            instrumentation.waitForIdleSync()
+        }
+        pick("TEN","・","点"); pick("TENTENTEN","…","⋯")
+        pick("EGAO","😊","(^_^)")
+        assertEquals("・…😊",inputText())
+    }
+    @Test fun englishExpressionAndIndependentOffSwitches() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { withTimeout(10_000) { app.expressions.entries.first { it.symbols.isNotEmpty() } }
+            app.settings.set(Prefs.emojiPrediction,true); app.settings.set(Prefs.facePrediction,true) }
+        touch(rect("英語に切り替え")); letters("SMILE")
+        await("English emoji and face") { findNode { it.text?.toString()=="😊" }!=null && findNode { it.text?.toString()=="(^_^)" }!=null }
+        runBlocking { app.settings.set(Prefs.emojiPrediction,false); app.settings.state.first { !it.emojiPrediction } }
+        await("only faces remain") { findNode { it.text?.toString()=="😊" }==null && findNode { it.text?.toString()=="(^_^)" }!=null }
+        clickLabel("(^_^)"); assertEquals("(^_^)",inputText())
+        runBlocking { app.settings.set(Prefs.emojiPrediction,true); app.settings.set(Prefs.facePrediction,true) }
+    }
     @Test fun shiftCanCancelAnUnusedSingleCapitalAndShowsThreeStates() {
         touch(rect("英語に切り替え")); touch(rect("Shift：小文字"))
         assertNotNull(findNode { it.contentDescription?.toString()=="Shift：次の1文字を大文字" })

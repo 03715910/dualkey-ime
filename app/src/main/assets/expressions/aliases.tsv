@@ -1,0 +1,53 @@
+# kind    language    readings separated by |    candidates separated by |
+symbol	ja	てん|ぽいんと|どっと|なかてん|くてん|とうてん|ぴりおど|かんま	・|、|.|。|,|．|，|･|·
+symbol	ja	てんてんてん|さんてんりーだー|りーだー|しょうりゃく	…|・・・|⋯|……|⋮|⋱
+symbol	ja	てんてん|にてんりーだー|にてん	‥|・・|:
+symbol	ja	くえすちょん|はてな|ぎもんふ	？|?|⁇|⁈
+symbol	ja	びっくり|かんたんふ|えくすくらめーしょん	！|!|‼|⁉
+symbol	ja	から|ー|なみだっしゅ|ちるだ	～|〜|~
+symbol	ja	おんぷ|おと|おんがく	♪|♫|♬|♩|♭|♯|♮
+symbol	ja	かっこ|ぶらけっと	（）|「」|『』|【】|［］|〈〉|《》|〔〕|｛｝
+symbol	ja	やじるし|むき|ほうこう	→|←|↑|↓|↔|↕|⇒|⇔|↗|↘|↙|↖|➜
+symbol	ja	ほし|あすたりすく|きらきら	★|☆|＊|✦|✧|✩
+symbol	ja	まる|さんかく|しかく|ずけい	○|●|◎|△|▲|▽|▼|□|■|◇|◆
+symbol	ja	はーと|こころ	♡|♥|❥|❣
+symbol	ja	ちぇっく|れ|ちぇっくまーく	✓|✔|☑|☐|☒
+symbol	ja	ぷらす|まいなす|かける|わる|すうがく	＋|−|±|×|÷|＝|≠|≤|≥|≒|∞|√
+symbol	ja	たんい|ど|ぱーせんと|せっし	％|‰|°|℃|℉|㎜|㎝|㎞|㎏|㎡
+symbol	ja	つうか|えん|どる|ゆーろ|ぽんど	¥|$|€|£|₩|¢|₿
+symbol	ja	ちょさくけん|しょうひょう|まるしー	©|®|™|℗
+symbol	ja	ゆうびん|でんわ|ふぁっくす	〒|☎|℡|℻
+symbol	ja	だっしゅ|はいふん|ぼう|よこぼう	‐|‑|–|—|―|−|ー
+symbol	ja	こめ|こめじるし|あすてりすく	※|＊|*|⁂
+emoji	ja	えがお|わらう|にっこり|うれしい	😊|😄|🙂|😁|☺️
+emoji	ja	ありがとう|かんしゃ|おれい	🙏|😊|🙇|💐
+emoji	ja	はーと|すき|だいすき|あい	❤️|💕|💖|💗|💝
+emoji	ja	ねこ|にゃんこ|にゃー	🐱|🐈|😺|🐈‍⬛
+emoji	ja	ないた|なく|なみだ|かなしい	😢|😭|🥲|😿
+emoji	ja	おめでとう|いわい|たんじょうび	🎉|🎊|🎂|🥳|🎁
+emoji	ja	おはよう|あさ	☀️|🌅|🐣
+emoji	ja	おやすみ|ねる|ねむい	😴|🌙|💤
+emoji	ja	ごめん|すみません|おねがい	🙏|🙇|🥺
+emoji	ja	いいね|りょうかい|おっけー	👍|👌|🆗
+emoji	en	thanks|thank you|thank|grateful	🙏|😊|🙇|💐
+emoji	en	cried|cry|sad|tears	😢|😭|🥲|😿
+emoji	en	heart|love	❤️|💕|💖|💗
+emoji	en	smile|happy|smiling	😊|😄|🙂|😁
+face	ja	えがお|わらう|にっこり|うれしい|smile|happy	(^_^)|(≧▽≦)|(＾▽＾)|(´▽｀)|(✿◠‿◠)
+face	ja	ありがとう|かんしゃ|おれい|thanks|thank you	(人´∀｀)|(人•ᴗ•♡)|(*ᴗˬᴗ)⁾⁾
+face	ja	はーと|だいすき|すき|heart|love	(♡˙︶˙♡)|(｡♥‿♥｡)|( ˘ ³˘)♥
+face	ja	ねこ|にゃんこ|cat|kitty	(=^・^=)|ฅ^•ﻌ•^ฅ|(=｀ω´=)
+face	ja	ないた|なく|なみだ|かなしい|cry|sad	(T_T)|(；ω；)|(つ﹏⊂)|(╥﹏╥)
+face	ja	おどろき|びっくり|surprise|wow	(ﾟдﾟ)|(°ロ°) !|Σ(・ω・ノ)ノ
+face	ja	こまる|しょんぼり|worried	(´・ω・｀)|(・・;)|(；´Д｀)
+face	ja	ねむい|おやすみ|sleep|sleepy	(-_-)zzz|(－ω－) zzZ|( ˘ω˘ )
+face	ja	おこる|いかり|angry	(｀Д´)|(＃｀皿´)|(ง •̀_•́)ง
+face	ja	おめでとう|やった|congrats|party	ヽ(・∀・)ﾉ|＼(^o^)／|٩(ˊᗜˋ*)و
+face	ja	おねがい|ごめん|すみません|please|sorry	(m_ _)m|(＞人＜；)|(｡>﹏<｡)
+face	ja	さようなら|ばいばい|bye	( ´ ▽ ` )ﾉ|(｡･ω･)ﾉﾞ|ヾ(＾∇＾)
+face	ja	てれる|はずかしい|shy|blush	(〃▽〃)|(⁄ ⁄•⁄ω⁄•⁄ ⁄)|(*/ω＼*)
+face	ja	がんばる|おうえん|cheer|fight	(ง •̀ω•́)ง✧|ᕦ(ò_óˇ)ᕤ|٩(๑•̀ω•́๑)۶
+face	ja	かんがえる|なやむ|think|thinking	(。-ω-)|(´-ω-｀)|(。ヘ°)
+face	ja	むひょうじょう|まがお|neutral	(・_・)|(-_-)|(￣ー￣)
+face	ja	わからない|しらない|shrug	¯\\_(ツ)_/¯|╮(￣_￣)╭
+face	ja	たべる|おいしい|eat|yummy	(๑´ڡ`๑)|(っ˘ڡ˘ς)

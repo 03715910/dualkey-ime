@@ -27,6 +27,9 @@ The small emergency Japanese fallback and English prediction list were written f
 No third-party keyboard artwork was copied.
 Supplemental Japanese single-kanji readings use Unicode Unihan 17.0.0 (kJapanese).
 Copyright Unicode, Inc. Unicode License V3 applies; see japanese/LICENSE-UNICODE.txt.
+
+Emoji keywords are derived from Japanese and English Unicode CLDR 47 annotations.
+Copyright Unicode, Inc. Unicode License V3 applies; see expressions/LICENSE-CLDR.txt.
 https://www.unicode.org/Public/17.0.0/ucd/Unihan.zip
 This service may contain translations powered by Google. Google disclaims all warranties related to the translations, express or implied, including any warranties of accuracy, reliability, and any implied warranties of merchantability, fitness for a particular purpose and noninfringement.
 

@@ -7,5 +7,7 @@
             android:windowSoftInputMode="adjustResize" />
         <receiver android:name="io.github.user03715910.dualkey.fixtures.LifecycleFixtureActivity$FinishReceiver"
             android:exported="true" />
+        <provider android:name="io.github.user03715910.dualkey.fixtures.LifecycleFixtureActivity$TestMediaProvider"
+            android:authorities="${applicationId}.test-media" android:exported="false" android:grantUriPermissions="true" />
     </application>
 </manifest>

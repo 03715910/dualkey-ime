@@ -30,7 +30,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private val conversion get() = app.japaneseDictionary.engine.value
     private data class CandidateQuery(val reading: String, val prediction: Boolean, val limit: Int,
         val dictionary: Map<String, List<String>>, val engine: ConversionEngine, val learning: LearningSnapshot,
-        val semantic: JapaneseLexicon?,val symbols: Map<String,List<String>>,val context: Candidate?)
+        val semantic: JapaneseLexicon?,val symbols: Map<String,List<String>>,val context: Candidate?,
+        val expressions: ExpressionCandidates,val emoji: Boolean,val face: Boolean)
     private var candidateQuery: CandidateQuery? = null
     private var candidateJob: Job? = null
     private var candidateLoading=false
@@ -86,6 +87,10 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var lastPolicy: HardwarePolicy? = null
     private val clipboardManager by lazy { getSystemService(ClipboardManager::class.java) }
     private var clipboardShowing=false
+    private var mediaPasteJob: Job?=null
+    private var mediaHistory=emptyList<MediaHistoryEntry>()
+    private var mediaHistoryEpoch=0L
+    private var selectionEpoch=0L
     private var blockedClipTimestamp=-1L
     private val clipboardListener=ClipboardManager.OnPrimaryClipChangedListener {
         if (settings.clipboardHistory && hasEditor() && !clipboardEligible()) {
@@ -111,12 +116,15 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         inputManager.registerInputDeviceListener(this, Handler(Looper.getMainLooper()))
         clipboardManager.addPrimaryClipChangedListener(clipboardListener)
         scope.launch { app.symbols.entries.collect { refreshCandidates() } }
+        scope.launch { app.expressions.entries.collect { refreshCandidates() } }
         scope.launch { app.clipboard.state.collect { if (clipboardShowing) clipboardHistory() } }
+        scope.launch { app.clipboard.clearEvents.collect { clearMediaHistory(); if (clipboardShowing) clipboardHistory() } }
         scope.launch { app.japaneseDictionary.engine.collect { refreshCandidates() } }
         scope.launch { app.semanticDictionary.lexicon.collect { refreshCandidates() } }
         scope.launch { app.japaneseDictionary.message.collect { ui?.dictionaryStatus(it) } }
         scope.launch { app.learning.state.collect { refreshCandidates() } }
         scope.launch { app.settings.state.collect {
+            if (!it.clipboardHistory) clearMediaHistory()
             if (lastPolicy!=null && lastPolicy!=it.policy) visibility.manual=null
             lastPolicy=it.policy
             visibility.policy = it.policy
@@ -413,7 +421,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 maxOf(settings.candidateCount,requestedLimit),settings.dictionary,conversion,
                 if (app.settings.isLoaded && settings.learningEnabled && learningAllowed) app.learning.state.value else LearningSnapshot(),
                 app.semanticDictionary.lexicon.value,app.symbols.entries.value,
-                committedTail?.takeIf { contextAllowed }?.word)
+                committedTail?.takeIf { contextAllowed }?.word,
+                app.expressions.entries.value,settings.emojiPrediction,settings.facePrediction)
             if (candidateQuery!=query) {
                 val retain=candidateQuery?.let { it.reading==query.reading && it.prediction==query.prediction }==true
                 candidateJob?.cancel(); candidateQuery=query; candidateLoading=false
@@ -445,8 +454,11 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                                 c.text in SemanticConversion.equivalents(app.semanticDictionary.lexicon.value,c.reading,c.reading))
                     } else emptyList(),settings.candidateCount)
             } else emptyList()
-            setCandidateRecords(if (predictionsAllowed && english && settings.englishPrediction)
-                EnglishPrediction.candidates(englishWord,10_000).map { Candidate(it,it.lowercase()) } else next)
+            setCandidateRecords(if (predictionsAllowed && english && settings.englishPrediction) {
+                val words=EnglishPrediction.candidates(englishWord,10_000).map { Candidate(it,it.lowercase()) }
+                (words.take(5)+app.expressions.entries.value.find(englishWord,true,true,settings.emojiPrediction,settings.facePrediction)+words.drop(5))
+                    .distinctBy { it.text }
+            } else next)
         }
         showCandidates()
     }
@@ -454,11 +466,23 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val converted=(query.engine as? DictionaryConversionEngine)?.candidates(query.reading,query.prediction,query.limit,query.learning.entries,query.learning.continuations)
             ?: query.engine.candidates(query.reading,query.prediction,query.limit)
         val general=(PhrasePrediction.candidates(query.reading,query.prediction)+converted).distinctBy { it.text }
-        val symbols=SymbolCandidates.candidates(query.reading,query.symbols,query.prediction)
+        val aliases=SymbolCandidates.candidates(query.reading,query.expressions.symbols,query.prediction)
+        val symbols=(aliases+SymbolCandidates.candidates(query.reading,query.symbols,query.prediction)).distinctBy { it.text }
+        val expressions=query.expressions.find(query.reading,false,query.prediction,query.emoji,query.face).ifEmpty {
+            // CLDR also indexes words written in kanji (e.g. 自動車). Try just the
+            // strongest dictionary matches, keeping the original reading for selection.
+            val reading=Personalization.normalize(query.reading)
+            general.asSequence().take(4).filter { it.reading==reading && it.text!=reading }
+                .flatMap { query.expressions.find(it.text,false,false,query.emoji,query.face).asSequence() }
+                .distinctBy { it.text }.take(6).map { Candidate(it.text,reading) }.toList()
+        }
         val equivalents=SemanticConversion.augment(query.reading,general,query.semantic,query.limit)
         val context=query.context?.let { NextWordPrediction.candidates(it,query.learning.continuations,64) }.orEmpty()
             .filter { it.reading==query.reading || query.prediction && it.reading.startsWith(query.reading) }
-        val combined=(context+equivalents.take((query.limit-symbols.size).coerceAtLeast(1))+symbols).distinctBy { it.text }
+        val words=(context+equivalents).distinctBy { it.text }
+        val early=if (aliases.any { it.reading==Personalization.normalize(query.reading) }) aliases.take(6) else emptyList()
+        val combined=(words.take(5)+early+expressions.take(10)+
+            words.drop(5).take((query.limit-symbols.size-expressions.size-5).coerceAtLeast(0))+symbols+expressions).distinctBy { it.text }
         // Legacy whole-input records are considered only if still supported by the dictionaries.
         val history=query.learning.entries.filter { h ->
             (h.reading==query.reading || query.prediction && h.reading.startsWith(query.reading)) &&
@@ -770,9 +794,88 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         refreshCandidates()
     }
     private fun pasteClipboard() {
+        if (hasEditor() && !sensitive && !numeric && !getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) {
+            val data=runCatching { clipboardManager.primaryClip }.getOrNull()
+            if (data!=null && data.itemCount>0 && data.getItemAt(0).uri?.scheme=="content" &&
+                (data.description.hasMimeType("image/*") || data.description.hasMimeType("video/*"))) {
+                pasteClipboardMedia(data)
+                return
+            }
+        }
         val clip=clipboardText()
         if (clip==null) { Toast.makeText(this,"貼り付けられる文字列がありません",Toast.LENGTH_SHORT).show(); return }
         pasteText(clip.first)
+    }
+    private fun clipboardMessage(message: String) = Toast.makeText(this,message,Toast.LENGTH_SHORT).show()
+
+    private fun pasteClipboardMedia(clip: ClipData) {
+        if (mediaPasteJob?.isActive==true) { clipboardMessage("メディアを準備中です"); return }
+        val inputSession=session
+        val inputRevision=revision
+        val inputSelection=selectionEpoch
+        val historyEpoch=mediaHistoryEpoch
+        val connection=currentInputConnection ?: return
+        val accepted=currentInputEditorInfo?.contentMimeTypes
+        if (accepted.isNullOrEmpty()) { clipboardMessage("この入力欄はメディアを受け取れません。アプリの添付ボタンをお使いください"); return }
+        val privateClip=clip.description.timestamp==blockedClipTimestamp ||
+            clip.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE",false)==true
+        fun current() = session==inputSession && revision==inputRevision && selectionEpoch==inputSelection && hasEditor() &&
+            currentInputConnection===connection && !sensitive && !numeric &&
+            !getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
+        mediaPasteJob=scope.launch {
+            var staged: SharedMedia?=null
+            var delivered=false
+            try {
+                val (uri,mime)=withContext(Dispatchers.IO) { app.clipboardMedia.description(clip) }
+                    ?: run { if (current()) clipboardMessage("コピーされた画像・動画を読み取れません。アプリから添付してください"); return@launch }
+                if (!current()) return@launch
+                if (!ClipboardMedia.accepts(mime,accepted)) {
+                    clipboardMessage("この入力欄はこの形式を受け取れません。アプリの添付ボタンをお使いください"); return@launch
+                }
+                val media=app.clipboardMedia.stage(uri,mime)
+                staged=media
+                if (!current()) return@launch
+                delivered=sendMedia(media)
+                if (delivered && !privateClip && historyEpoch==mediaHistoryEpoch && settings.clipboardHistory && clipboardEligible()) {
+                    mediaHistory=(listOf(MediaHistoryEntry(media,null))+currentMedia()).take(minOf(5,settings.clipboardLimit))
+                    scope.launch {
+                        val bitmap=app.clipboardMedia.thumbnail(media)
+                        mediaHistory=mediaHistory.map { if (it.media==media) it.copy(preview=bitmap) else it }
+                        if (clipboardShowing) clipboardHistory()
+                    }
+                }
+            } catch (e: CancellationException) { throw e }
+            catch (_: Exception) { if (current()) clipboardMessage("メディアを読み取れないか、容量上限（1件32 MiB）を超えています。アプリから添付してください") }
+            finally { if (!delivered) staged?.let(app.clipboardMedia::discard) }
+        }
+    }
+
+    private fun sendMedia(media: SharedMedia): Boolean {
+        if (!hasEditor() || sensitive || numeric || getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked ||
+            !ClipboardMedia.accepts(media.mime,currentInputEditorInfo?.contentMimeTypes)) {
+            clipboardMessage("この入力欄はこの形式を受け取れません。アプリから添付してください"); return false
+        }
+        if (System.currentTimeMillis()>=media.expires || !media.file.isFile) {
+            clipboardMessage("メディアの有効期限が切れました。コピーし直してください"); return false
+        }
+        val connection=currentInputConnection ?: return false
+        invalidateTranslation()
+        commitComposition(false); finishEnglish(); clearState()
+        connection.finishComposingText()
+        val ok=runCatching { connection.commitContent(
+            InputContentInfo(media.uri,ClipDescription("DualKey",arrayOf(media.mime)),null),
+            InputConnection.INPUT_CONTENT_GRANT_READ_URI_PERMISSION,null
+        ) }.getOrDefault(false)
+        if (!ok) clipboardMessage("アプリがメディアを受け取れませんでした。アプリから添付してください")
+        return ok
+    }
+
+    private fun currentMedia(): List<MediaHistoryEntry> = if (!settings.clipboardHistory) emptyList()
+        else mediaHistory.filter { System.currentTimeMillis()<it.media.expires && it.media.file.isFile }.take(minOf(5,settings.clipboardLimit))
+    private fun clearMediaHistory() {
+        mediaHistoryEpoch++
+        mediaHistory.forEach { app.clipboardMedia.discard(it.media) }
+        mediaHistory=emptyList()
     }
     private fun clipboardHistory() {
         if (!clipboardEligible()) {
@@ -784,8 +887,11 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         ui?.showClipboard(app.clipboard.current(),settings.clipboardHistory,
             { entry -> if (entry in app.clipboard.current()) pasteText(entry.text) },
             { entry -> app.clipboard.remove(entry) },
-            { app.clipboard.clear() },
-            { clipboardShowing=false; ui?.hideTranslation() })
+            { clearMediaHistory(); app.clipboard.clear(); clipboardHistory() },
+            { clipboardShowing=false; ui?.hideTranslation() },
+            currentMedia(),
+            { entry -> if (entry in currentMedia()) sendMedia(entry.media) },
+            { entry -> mediaHistory=mediaHistory.filterNot { it==entry }; app.clipboardMedia.discard(entry.media); clipboardHistory() })
     }
     private fun moveCursor(step: Int) {
         invalidateTranslation()
@@ -890,6 +996,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean = if (consumed.remove(keyCode)) true else super.onKeyUp(keyCode,event)
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart,oldSelEnd,newSelStart,newSelEnd,candidatesStart,candidatesEnd)
+        if (oldSelStart!=newSelStart || oldSelEnd!=newSelEnd) selectionEpoch++
         val ownsComposition=!composer.isEmpty || englishWord.isNotEmpty()
         val moved=oldSelStart!=newSelStart || oldSelEnd!=newSelEnd
         if (ownsComposition && compositionRestoreJob?.isActive==true && candidatesEnd<0 &&

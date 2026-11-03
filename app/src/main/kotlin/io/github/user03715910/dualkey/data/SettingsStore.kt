@@ -32,6 +32,8 @@ object Prefs {
     val ctrlSpace = booleanPreferencesKey("shortcut_ctrl_space")
     val layout = stringPreferencesKey("hardware_layout")
     val japanesePrediction = booleanPreferencesKey("japanese_prediction")
+    val emojiPrediction = booleanPreferencesKey("emoji_prediction")
+    val facePrediction = booleanPreferencesKey("face_prediction")
     val englishPrediction = booleanPreferencesKey("english_prediction")
     val candidateCount = intPreferencesKey("candidate_count")
     val learningEnabled = booleanPreferencesKey("japanese_learning_enabled")
@@ -75,6 +77,8 @@ data class Settings(val p: Preferences = emptyPreferences()) {
     val ctrlSpace get() = p[Prefs.ctrlSpace] ?: true
     val jisKeyboard get() = p[Prefs.layout] != "US"
     val japanesePrediction get() = p[Prefs.japanesePrediction] ?: true
+    val emojiPrediction get() = p[Prefs.emojiPrediction] ?: true
+    val facePrediction get() = p[Prefs.facePrediction] ?: true
     val englishPrediction get() = p[Prefs.englishPrediction] ?: true
     val candidateCount get() = (p[Prefs.candidateCount] ?: 100).coerceIn(2,1000)
     val learningEnabled get() = p[Prefs.learningEnabled] ?: true

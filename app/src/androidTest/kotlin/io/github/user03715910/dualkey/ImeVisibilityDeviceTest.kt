@@ -13,6 +13,7 @@ import androidx.test.platform.app.InstrumentationRegistry
 import io.github.dualkey.core.DisplayMode
 import io.github.user03715910.dualkey.data.Prefs
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.flow.first
 import org.junit.*
 import org.junit.Assert.*
 import org.junit.runner.RunWith
@@ -58,8 +59,8 @@ class ImeVisibilityDeviceTest {
             }
         }
     }
-    private fun launch() {
-        val result=shell("am start -W -f 0x10008000 -n $fixture")
+    private fun launch(media: String?=null) {
+        val result=shell("am start -W -f 0x10008000 -n $fixture"+(media?.let { " --es media $it" } ?: ""))
         assertFalse(result,result.contains("Error"))
         await("local video playing") { fixtureState().contains("video=playing") }
     }
@@ -107,6 +108,41 @@ class ImeVisibilityDeviceTest {
     @After fun cleanup() {
         shell("am broadcast -n ${fixture}\$FinishReceiver")
         main { ImeControl.requests.value=null }
+    }
+    private fun mediaResult()=shell("dumpsys activity $fixture").lineSequence().firstOrNull { it.contains("FixtureMedia:") }.orEmpty()
+    private fun keyboardAction(label: String,action: Int=AccessibilityNodeInfo.ACTION_CLICK) {
+        fun find(node: AccessibilityNodeInfo?): AccessibilityNodeInfo? {
+            if (node==null) return null
+            if (node.text?.toString()==label || node.contentDescription?.toString()==label) return node
+            for (i in 0 until node.childCount) find(node.getChild(i))?.let { return it }
+            return null
+        }
+        await("keyboard action $label") { automation.windows.filter { it.type==android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
+            .firstNotNullOfOrNull { find(it.root) }?.performAction(action)==true }
+    }
+    @Test fun richEditorReceivesImagesGifAndVideoWithActualReadGrant() {
+        launch("rich"); await("rich editor window focused") { fixtureState().contains("windowFocus=true") }; edit()
+        listOf("test.png" to "image/png","test.jpeg" to "image/jpeg","test.webp" to "image/webp",
+            "test.gif" to "image/gif","lifecycle-video.mp4" to "video/mp4").forEach { (file,mime) ->
+            click("copy-$file"); keyboardAction("貼り付け")
+            await("received $mime: ${mediaResult()}") { mediaResult().contains("$mime; match=true") }
+        }
+        letters("ka"); await("regular text still works") { text()=="か" }
+    }
+    @Test fun richHistoryCanPasteAgainAndRejectUnsupportedVideo() {
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        try {
+            launch("images"); await("image editor window focused") { fixtureState().contains("windowFocus=true") }; edit()
+            click("copy-test.png"); keyboardAction("貼り付け")
+            await("PNG received") { mediaResult().contains("image/png; match=true") }
+            click("reset-media")
+            keyboardAction("貼り付け",AccessibilityNodeInfo.ACTION_LONG_CLICK)
+            keyboardAction("メディア履歴：画像")
+            await("history PNG received again") { mediaResult().contains("image/png; match=true") }
+            click("copy-lifecycle-video.mp4"); keyboardAction("貼り付け"); SystemClock.sleep(500)
+            assertTrue(mediaResult(),mediaResult().contains("FixtureMedia: none"))
+            letters("ka"); await("unsupported MIME leaves text input usable") { text()=="か" }
+        } finally { runBlocking { app.settings.set(Prefs.clipboardHistory,false) } }
     }
     @Test fun videoRotationAndFullscreenNeverRequestTextInput() {
         stableHidden(); assertFalse(ImeControl.state.value.editorActive)

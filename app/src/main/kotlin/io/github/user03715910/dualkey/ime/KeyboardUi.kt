@@ -167,20 +167,29 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             row(listOf((if (english) "日本語" else "abc") to "mode", "記号" to "symbols", (if (english) "," else "カナ/英") to (if (english) "," else "cycle_script"), (if (english) "Space" else "空白/変換") to "space", "." to ".", "↵" to "enter"))
             keys.getChildAt(2).let { it as LinearLayout }.getChildAt(0).contentDescription=when (shift) { 2 -> "Shift：大文字固定"; 1 -> "Shift：次の1文字を大文字"; else -> "Shift：小文字" }
         } else if (english) {
-            val groups=listOf(
-                listOf(listOf(".",",","?","!","'"),listOf("a","b","c","",""),listOf("d","e","f","","")),
-                listOf(listOf("g","h","i","",""),listOf("j","k","l","",""),listOf("m","n","o","","")),
-                listOf(listOf("p","q","r","s",""),listOf("t","u","v","",""),listOf("w","x","y","z","")))
-            val shiftLabel=when (shift) { 2 -> "⇪"; 1 -> "⬆"; else -> "⇧" }
-            val left=listOf(shiftLabel to "shift","◀" to "cursor_left","記号" to "symbols")
-            val right=listOf("⌫" to "delete","▶" to "cursor_right","空白" to "space")
-            groups.forEachIndexed { index,group -> keys.addView(LinearLayout(context).apply {
-                isBaselineAligned=false
-                addView(button(left[index].first,left[index].second,function=true,description=if (index==0) when (shift) { 2 -> "Shift：大文字固定"; 1 -> "Shift：次の1文字を大文字"; else -> "Shift：小文字" } else left[index].first))
-                group.forEach { raw -> val values=raw.map { if (shift>0) it.uppercase() else it }; addView(FlickKey(context,values,dp(settings.flickDp).toFloat(),feedback,callback,!sensitive).also(::decorate)) }
-                addView(button(right[index].first,right[index].second,function=true))
-            }) }
-            row(listOf("日本語" to "mode", "@" to "@", "-" to "-", "Space" to "space", "↵" to "enter"))
+            fun flick(values: List<String>,label: String,description: String) =
+                FlickKey(context,values,dp(settings.flickDp).toFloat(),feedback,callback,!sensitive,label,description).also(::decorate)
+            fun alphabet(group: String): View {
+                val label=if (shift>0) group.uppercase() else group
+                return flick(label.map(Char::toString)+List(5-label.length){""},label,"${label[0]}行")
+            }
+            fun controls(vararg cells: View) {
+                keys.addView(LinearLayout(context).apply { isBaselineAligned=false; cells.forEach { addView(it) } })
+            }
+            controls(flick(listOf("'", "\"", "`", ":", ";"),"'\"", "引用符"),
+                flick(listOf("@","_","-","+","&"),"@_-","アットマーク"),alphabet("abc"),alphabet("def"),
+                button("⌫","delete",function=true,description="削除"))
+            controls(button("◀","cursor_left",function=true,description="カーソルを左へ"),
+                alphabet("ghi"),alphabet("jkl"),alphabet("mno"),button("▶","cursor_right",function=true,description="カーソルを右へ"))
+            controls(button("記号","symbols",function=true,description="記号入力"),
+                alphabet("pqrs"),alphabet("tuv"),alphabet("wxyz"),button("空白","space",function=true))
+            val shiftKey=button(when (shift) { 2 -> "A/A ⇪"; 1 -> "A/a"; else -> "a/A" },"shift",function=true).apply {
+                contentDescription=when (shift) { 2 -> "Shift：大文字固定"; 1 -> "Shift：次の1文字を大文字"; else -> "Shift：小文字" }
+            }
+            controls(button("日本語","mode",function=true),shiftKey,
+                flick(listOf("/","(",")","[","]"),"/( )","スラッシュ・括弧"),
+                flick(listOf(".",",","?","!","…"),".,!?","句読点"),
+                button("↵","enter",function=true,description="確定・改行"))
         } else {
             val groups = listOf(
                 listOf(listOf("あ","い","う","え","お"),listOf("か","き","く","け","こ"),listOf("さ","し","す","せ","そ")),
@@ -269,10 +278,13 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     }
     fun hideTranslation() { translationPanel.visibility=View.GONE; translationPanel.removeAllViews(); updateBody() }
     fun showClipboard(entries: List<io.github.user03715910.dualkey.data.ClipboardEntry>,enabled: Boolean,
-        paste: (io.github.user03715910.dualkey.data.ClipboardEntry)->Unit,remove: (io.github.user03715910.dualkey.data.ClipboardEntry)->Unit,clear: ()->Unit,close: ()->Unit) {
+        paste: (io.github.user03715910.dualkey.data.ClipboardEntry)->Unit,remove: (io.github.user03715910.dualkey.data.ClipboardEntry)->Unit,clear: ()->Unit,close: ()->Unit,
+        media: List<io.github.user03715910.dualkey.data.MediaHistoryEntry>,
+        pasteMedia: (io.github.user03715910.dualkey.data.MediaHistoryEntry)->Unit,
+        removeMedia: (io.github.user03715910.dualkey.data.MediaHistoryEntry)->Unit) {
         translationPanel.removeAllViews(); translationPanel.visibility=View.VISIBLE; candidateExpanded=false; updateBody()
         translationPanel.addView(TextView(context).apply {
-            text=if (!enabled) "履歴保存はOFFです。設定の「入力とサイズ」で有効にできます。" else if (entries.isEmpty()) "保存した履歴はありません（保存期間24時間）" else "クリップボード履歴・24時間以内"
+            text=if (!enabled) "履歴保存はOFFです。設定の「入力とサイズ」で有効にできます。" else if (entries.isEmpty() && media.isEmpty()) "保存した履歴はありません（文字は24時間以内）" else "クリップボード履歴・文字24時間／メディア10分"
             textSize=13f; setTextColor(ink); setPadding(dp(8),dp(4),dp(8),dp(4))
         })
         val list=androidx.recyclerview.widget.RecyclerView(context).apply {
@@ -280,28 +292,43 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             layoutManager=androidx.recyclerview.widget.LinearLayoutManager(context); itemAnimator=null
         }
         list.adapter=object: androidx.recyclerview.widget.RecyclerView.Adapter<ClipboardCell>() {
-            override fun getItemCount()=entries.size
+            override fun getItemCount()=entries.size+media.size
             override fun onCreateViewHolder(parent: ViewGroup,type: Int): ClipboardCell {
                 val row=LinearLayout(context).apply { isBaselineAligned=false; layoutParams=androidx.recyclerview.widget.RecyclerView.LayoutParams(-1,-2) }
                 val label=TextView(context).apply { textSize=16f; setTextColor(ink); minHeight=dp(44); maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END; setPadding(dp(8),dp(4),dp(8),dp(4)); isFocusable=false }
+                val preview=ImageView(context).apply { scaleType=ImageView.ScaleType.CENTER_CROP; importantForAccessibility=View.IMPORTANT_FOR_ACCESSIBILITY_NO }
                 val delete=button("削除","noop",true)
+                row.addView(preview,LinearLayout.LayoutParams(dp(44),dp(44)))
                 row.addView(label,LinearLayout.LayoutParams(0,-2,1f)); row.addView(delete,LinearLayout.LayoutParams(dp(56),dp(44)))
-                return ClipboardCell(row,label,delete)
+                return ClipboardCell(row,label,delete,preview)
             }
             override fun onBindViewHolder(holder: ClipboardCell,position: Int) {
-                val entry=entries[position]; holder.label.text=entry.text; holder.label.contentDescription="履歴 ${position+1}：${entry.text}"
-                holder.label.setOnClickListener { paste(entry) }; holder.delete.contentDescription="履歴 ${position+1}を削除"
-                holder.delete.setOnClickListener { remove(entry) }
+                if (position<entries.size) {
+                    val entry=entries[position]; holder.label.text=entry.text; holder.label.contentDescription="履歴 ${position+1}：${entry.text}"
+                    holder.preview.setImageDrawable(null); holder.preview.visibility=View.GONE; holder.preview.setOnClickListener(null)
+                    holder.label.setOnClickListener { paste(entry) }; holder.delete.contentDescription="履歴 ${position+1}を削除"
+                    holder.delete.setOnClickListener { remove(entry) }
+                } else {
+                    val entry=media[position-entries.size]
+                    val kind=when { entry.media.mime=="image/gif" -> "GIF"; entry.media.mime.startsWith("video/") -> "動画"; else -> "画像" }
+                    holder.label.text="$kind · ${entry.media.mime.substringAfter('/').uppercase()}"
+                    holder.label.contentDescription="メディア履歴：$kind"
+                    holder.preview.setImageBitmap(entry.preview); holder.preview.visibility=if (entry.preview!=null) View.VISIBLE else View.GONE
+                    holder.preview.setOnClickListener { pasteMedia(entry) }
+                    holder.label.setOnClickListener { pasteMedia(entry) }
+                    holder.delete.contentDescription="メディア履歴 ${position-entries.size+1}を削除"
+                    holder.delete.setOnClickListener { removeMedia(entry) }
+                }
             }
         }
         translationPanel.addView(list)
         translationPanel.addView(LinearLayout(context).apply {
             isBaselineAligned=false
             addView(button("閉じる","noop",true).apply { setOnClickListener { close() } })
-            addView(button("全削除","noop",true).apply { isEnabled=enabled && entries.isNotEmpty(); setOnClickListener {
+            addView(button("全削除","noop",true).apply { isEnabled=enabled && (entries.isNotEmpty() || media.isNotEmpty()); setOnClickListener {
                 text="削除する"; setOnClickListener { clear() }
             } })
         })
     }
-    private class ClipboardCell(row: View,val label: TextView,val delete: TextView): androidx.recyclerview.widget.RecyclerView.ViewHolder(row)
+    private class ClipboardCell(row: View,val label: TextView,val delete: TextView,val preview: ImageView): androidx.recyclerview.widget.RecyclerView.ViewHolder(row)
 }
