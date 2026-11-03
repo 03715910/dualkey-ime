@@ -70,6 +70,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var symbols = false
     private var sensitive = false
     private var predictionsAllowed = true
+    private var japaneseConversionAllowed = false
     private var learningAllowed = false
     private var contextAllowed = false
     private data class CommittedTail(val word: Candidate,val position: Int?)
@@ -289,7 +290,10 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)) ||
             (klass == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
         numeric = klass == InputType.TYPE_CLASS_NUMBER || klass == InputType.TYPE_CLASS_PHONE || klass == InputType.TYPE_CLASS_DATETIME
-        predictionsAllowed = inputStarted && !sensitive && !numeric && type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0
+        // Editors may provide their own completions. Kana-to-kanji conversion still
+        // needs local candidates to turn the composing reading into Japanese text.
+        japaneseConversionAllowed = inputStarted && !sensitive && klass == InputType.TYPE_CLASS_TEXT
+        predictionsAllowed = japaneseConversionAllowed && type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0
         learningAllowed = predictionsAllowed && klass==InputType.TYPE_CLASS_TEXT &&
             attribute.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING==0 &&
             variation !in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI)
@@ -452,15 +456,15 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private fun resetConversion() { selected=-1; converting=false }
     private fun refreshCandidates() {
         continuationCandidates=false
-        if (predictionsAllowed && !english && !composer.isEmpty && (converting || settings.japanesePrediction)) {
+        if (japaneseConversionAllowed && !english && !composer.isEmpty && (converting || settings.japanesePrediction)) {
             if (requestedReading!=composer.reading) { requestedReading=composer.reading; requestedLimit=maxOf(64,settings.candidateCount) }
-            val query=CandidateQuery(composer.reading,!converting && settings.japanesePrediction,
+            val query=CandidateQuery(composer.reading,!converting && predictionsAllowed && settings.japanesePrediction,
                 maxOf(settings.candidateCount,requestedLimit),settings.dictionary,conversion,
                 if (app.settings.isLoaded && settings.learningEnabled && learningAllowed) app.learning.state.value else LearningSnapshot(),
                 app.semanticDictionary.lexicon.value,app.symbols.entries.value,
                 committedTail?.takeIf { contextAllowed }?.word,
                 app.expressions.entries.value,settings.emojiPrediction,settings.facePrediction)
-            if (candidateQuery!=query) {
+            if (candidateQuery!=query || (converting && candidateLoading)) {
                 val retain=candidateQuery?.let { it.reading==query.reading && it.prediction==query.prediction }==true
                 candidateJob?.cancel(); candidateQuery=query; candidateLoading=false
                 if (converting && query.limit<=100) {
@@ -547,7 +551,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         showHardwareCandidates()
     }
     private fun showHardwareCandidates() {
-        if (!hardwareCandidates || !hasEditor() || sensitive || english || !predictionsAllowed ||
+        if (!hardwareCandidates || !hasEditor() || sensitive || english || !japaneseConversionAllowed ||
             (!converting && !continuationCandidates) || selected !in candidates.indices) {
             closeHardwarePanel(); return
         }

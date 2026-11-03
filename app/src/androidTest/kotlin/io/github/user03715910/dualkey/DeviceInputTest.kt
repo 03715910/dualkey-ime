@@ -1036,6 +1036,21 @@ class DeviceInputTest {
         key(KeyEvent.KEYCODE_SPACE)
         assertEquals("aAbAa ",inputText())
     }
+    @Test fun searchEditorWithoutSuggestionsStillConvertsJapanese() {
+        main {
+            editor.inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+            editor.imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH
+            activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
+        }
+        await("search editor disables predictions") { "predictions=false" in diagnostic() }
+        letters("TENKI")
+        assertEquals("てんき",inputText())
+        await("kana-to-kanji candidate") { findNode { it.text?.toString()=="天気" }!=null }
+        touch(rect("空白"))
+        await("space converts reading") { inputText()=="天気" }
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("天気",inputText())
+    }
     @Test fun passwordDisablesSuggestionsAndTranslation() {
         main { editor.inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; editor.setText(""); activity.getSystemService(InputMethodManager::class.java).restartInput(editor) }
         await("password input mode ready") { "sensitive=true" in diagnostic() && findNode { it.contentDescription?.toString()=="日本語に切り替え" }!=null && findNode { it.text?.toString()=="翻訳" }==null }
