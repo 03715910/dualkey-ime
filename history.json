@@ -1,6 +1,25 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 16,
+    "versionName": "0.1.13",
+    "releaseDate": "2026-11-03",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.13/DualKeyIME-0.1.13.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "6c595ff4bc2a6fc6fd5d854739f9350dcd2af017b8c3cdeb4a1f9fbf28d025b8",
+    "sizeBytes": 101736571,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "候補一覧に「すべて」「絞り込み」「絵文字」「顔文字」の固定タブを追加",
+      "読みの一致に基づく絞り込みと、数字・漢字の直接変換候補の優先表示",
+      "「にこ」の数字表記、笑顔・ハートなどの絵文字と顔文字の候補を拡充",
+      "コピーしたメディアをキーボード上部でプレビューして貼り付け",
+      "履歴ON時に文字・画像・GIF・動画を新しい順で表示し、メディアの保存期間を設定可能に"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 15,
     "versionName": "0.1.12",
     "releaseDate": "2026-11-03",
