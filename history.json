@@ -1,6 +1,21 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 22,
+    "versionName": "0.1.19",
+    "releaseDate": "2026-11-03",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.19/DualKeyIME-0.1.19.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "30693d5cbca0bec4cdc54d8f7f24a68f4b6144cf408b761227d8f62951a26fc5",
+    "sizeBytes": 101753203,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "コピーした文字や画像の貼り付け候補を、撮影直後のスクショと同じ変換候補の段に表示します。候補が出てもキーボードの高さは変わりません。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 21,
     "versionName": "0.1.18",
     "releaseDate": "2026-11-03",
