@@ -1,15 +1,17 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 20,
-  "versionName": "0.1.17",
+  "versionCode": 21,
+  "versionName": "0.1.18",
   "releaseDate": "2026-11-03",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.17/DualKeyIME-0.1.17.apk",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.18/DualKeyIME-0.1.18.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "5905cb71c6227e09823c56bded5f5a274479544389f502595b22d0c6d0123240",
-  "sizeBytes": 101736683,
+  "sha256": "c503cebef355ebe3bb8f8383f26274f1607016c619cfde520285cdb721491e33",
+  "sizeBytes": 101753203,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "履歴に登録したスクリーンショットを、撮影から2分を過ぎても選べるようにしました。履歴の最大件数内で、元画像が端末にある間利用できます。"
+    "クリップボードをツールバーから1タップで開けます。履歴画面から保存を切り替え、よく使うテキストやコピー画像を固定できます。",
+    "コピーしたテキストを貼り付け候補に表示します。",
+    "撮影直後のスクショは変換候補と同じ段に「スクリーンショットを挿入」と表示されます。"
   ]
 }
