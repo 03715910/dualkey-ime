@@ -1,6 +1,21 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 23,
+    "versionName": "0.1.20",
+    "releaseDate": "2026-11-03",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.20/DualKeyIME-0.1.20.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "cdc29bb2b04101bac4e3062fd390baddbf92143d2477c60e7f32cc4ee1ac1afb",
+    "sizeBytes": 101753203,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "Samsung Notesで確定済みの文字や選択した画像を削除できるよう、削除キーをNotes本体に渡します。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 22,
     "versionName": "0.1.19",
     "releaseDate": "2026-11-03",
