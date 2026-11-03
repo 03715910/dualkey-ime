@@ -134,10 +134,17 @@ class ImeVisibilityDeviceTest {
             assertTrue(mediaResult(),mediaResult().contains("FixtureMedia: none"))
             keyboardAction("撮ったスクショのプレビュー")
             await("screenshot received from MediaStore") { mediaResult().contains("image/png; match=true") }
+            await("screenshot stored in history") { app.clipboard.screenshotState.value.isNotEmpty() }
+            val saved=app.clipboard.screenshotState.value.first()
+            SystemClock.sleep((saved.expiresAt-System.currentTimeMillis()).coerceAtLeast(0L)+250L)
+            assertTrue(app.clipboard.screenshotState.value.contains(saved))
             click("reset-media")
             keyboardAction("貼り付け",AccessibilityNodeInfo.ACTION_LONG_CLICK)
             keyboardAction("履歴：撮ったスクショを貼り付け")
-            await("screenshot received from history") { mediaResult().contains("image/png; match=true") }
+            await("expired preview screenshot received from history") { mediaResult().contains("image/png; match=true") }
+            keyboardAction("貼り付け",AccessibilityNodeInfo.ACTION_LONG_CLICK)
+            keyboardAction("履歴からスクショを削除")
+            await("screenshot removed from history") { saved !in app.clipboard.screenshotState.value }
         } finally {
             click("delete-screenshot")
             runBlocking { app.settings.set(Prefs.recentScreenshots,false); app.settings.set(Prefs.clipboardHistory,false) }

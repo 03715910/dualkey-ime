@@ -350,36 +350,27 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             setOnClickListener { dismiss() }
         })
     }
-    fun showClipboard(entries: List<io.github.user03715910.dualkey.data.ClipboardEntry>,enabled: Boolean,
+    internal fun showClipboard(entries: List<io.github.user03715910.dualkey.data.ClipboardEntry>,enabled: Boolean,
         paste: (io.github.user03715910.dualkey.data.ClipboardEntry)->Unit,remove: (io.github.user03715910.dualkey.data.ClipboardEntry)->Unit,clear: ()->Unit,close: ()->Unit,
         media: List<io.github.user03715910.dualkey.data.MediaHistoryEntry>, limit: Int,
         pasteMedia: (io.github.user03715910.dualkey.data.MediaHistoryEntry)->Unit,
         removeMedia: (io.github.user03715910.dualkey.data.MediaHistoryEntry)->Unit,
-        pasteScreenshot: (()->Unit)?, screenshotPreview: android.graphics.Bitmap?, dismissScreenshot: ()->Unit) {
+        screenshots: List<io.github.user03715910.dualkey.data.RecentScreenshot>,
+        pasteScreenshot: (io.github.user03715910.dualkey.data.RecentScreenshot)->Unit,
+        removeScreenshot: (io.github.user03715910.dualkey.data.RecentScreenshot)->Unit,
+        loadScreenshot: (io.github.user03715910.dualkey.data.RecentScreenshot,ImageView)->Unit) {
         translationPanel.removeAllViews(); translationPanel.visibility=View.VISIBLE; candidateExpanded=false; updateBody()
         translationPanel.addView(TextView(context).apply {
-            text=if (!enabled) "履歴保存はOFFです。設定の「入力とサイズ」で有効にできます。" else if (entries.isEmpty() && media.isEmpty() && pasteScreenshot==null) "保存した履歴はありません（文字は24時間以内）" else "クリップボード履歴・新しい順"
+            text=if (!enabled) "履歴保存はOFFです。設定の「入力とサイズ」で有効にできます。" else if (entries.isEmpty() && media.isEmpty() && screenshots.isEmpty()) "保存した履歴はありません（文字は24時間以内）" else "クリップボード履歴・新しい順"
             textSize=13f; setTextColor(ink); setPadding(dp(8),dp(4),dp(8),dp(4))
         })
-        if (pasteScreenshot!=null) translationPanel.addView(LinearLayout(context).apply {
-            gravity=Gravity.CENTER_VERTICAL
-            if (screenshotPreview!=null) addView(ImageView(context).apply {
-                setImageBitmap(screenshotPreview); scaleType=ImageView.ScaleType.CENTER_CROP
-                setOnClickListener { pasteScreenshot() }
-            },LinearLayout.LayoutParams(dp(44),dp(44)))
-            addView(button("撮ったスクショ","noop",true).apply {
-                contentDescription="履歴：撮ったスクショを貼り付け"
-                setOnClickListener { pasteScreenshot() }
-            })
-            addView(button("削除","noop",true).apply {
-                contentDescription="履歴からスクショを隠す"
-                setOnClickListener { dismissScreenshot() }
-            },LinearLayout.LayoutParams(dp(56),dp(44)))
-        })
-        val ordered=(entries.mapIndexed { index,entry -> index to entry.time } +
+        val mediaEnd=entries.size+media.size
+        val copied=(entries.mapIndexed { index,entry -> index to entry.time } +
             media.mapIndexed { index,entry -> entries.size+index to entry.copiedAt }).sortedByDescending { it.second }.take(limit)
+        val ordered=(copied+screenshots.mapIndexed { index,entry -> mediaEnd+index to entry.addedAt })
+            .sortedByDescending { it.second }
         val list=androidx.recyclerview.widget.RecyclerView(context).apply {
-            layoutParams=LinearLayout.LayoutParams(-1,dp(if (pasteScreenshot==null) 128 else 84)); isFocusable=false
+            layoutParams=LinearLayout.LayoutParams(-1,dp(128)); isFocusable=false
             layoutManager=androidx.recyclerview.widget.LinearLayoutManager(context); itemAnimator=null
         }
         list.adapter=object: androidx.recyclerview.widget.RecyclerView.Adapter<ClipboardCell>() {
@@ -395,12 +386,13 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             }
             override fun onBindViewHolder(holder: ClipboardCell,adapterPosition: Int) {
                 val position=ordered[adapterPosition].first
+                holder.preview.tag=null
                 if (position<entries.size) {
                     val entry=entries[position]; holder.label.text=entry.text; holder.label.contentDescription="履歴 ${position+1}：${entry.text}"
                     holder.preview.setImageDrawable(null); holder.preview.visibility=View.GONE; holder.preview.setOnClickListener(null)
                     holder.label.setOnClickListener { paste(entry) }; holder.delete.contentDescription="履歴 ${position+1}を削除"
                     holder.delete.setOnClickListener { remove(entry) }
-                } else {
+                } else if (position<mediaEnd) {
                     val entry=media[position-entries.size]
                     val kind=when { entry.media.mime=="image/gif" -> "GIF"; entry.media.mime.startsWith("video/") -> "動画"; else -> "画像" }
                     holder.label.text="$kind · ${entry.media.mime.substringAfter('/').uppercase()}"
@@ -410,6 +402,18 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
                     holder.label.setOnClickListener { pasteMedia(entry) }
                     holder.delete.contentDescription="メディア履歴 ${position-entries.size+1}を削除"
                     holder.delete.setOnClickListener { removeMedia(entry) }
+                } else {
+                    val entry=screenshots[position-mediaEnd]
+                    holder.label.text="撮ったスクショ"
+                    holder.label.contentDescription="履歴：撮ったスクショを貼り付け"
+                    holder.label.setOnClickListener { pasteScreenshot(entry) }
+                    holder.preview.setImageDrawable(null)
+                    holder.preview.visibility=View.VISIBLE
+                    holder.preview.tag=entry
+                    holder.preview.setOnClickListener { pasteScreenshot(entry) }
+                    holder.delete.contentDescription="履歴からスクショを削除"
+                    holder.delete.setOnClickListener { removeScreenshot(entry) }
+                    loadScreenshot(entry,holder.preview)
                 }
             }
         }
@@ -417,7 +421,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         translationPanel.addView(LinearLayout(context).apply {
             isBaselineAligned=false
             addView(button("閉じる","noop",true).apply { setOnClickListener { close() } })
-            addView(button("全削除","noop",true).apply { isEnabled=enabled && (entries.isNotEmpty() || media.isNotEmpty() || pasteScreenshot!=null); setOnClickListener {
+            addView(button("全削除","noop",true).apply { isEnabled=enabled && (entries.isNotEmpty() || media.isNotEmpty() || screenshots.isNotEmpty()); setOnClickListener {
                 text="削除する"; setOnClickListener { clear() }
             } })
         })

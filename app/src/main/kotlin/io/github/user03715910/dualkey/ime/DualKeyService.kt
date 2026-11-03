@@ -101,7 +101,6 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var screenshotJob: Job?=null
     private var screenshotObserverRegistered=false
     private var displayedScreenshot: RecentScreenshot?=null
-    private var screenshotThumbnail: android.graphics.Bitmap?=null
     private var dismissedScreenshot: RecentScreenshot?=null
     private val screenshotObserver=object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) { refreshScreenshot() }
@@ -140,6 +139,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         clipboardManager.addPrimaryClipChangedListener(clipboardListener)
         scope.launch { app.symbols.entries.collect { refreshCandidates() } }
         scope.launch { app.expressions.entries.collect { refreshCandidates() } }
+        scope.launch { app.clipboard.screenshotState.collect { if (clipboardShowing) clipboardHistory() } }
         scope.launch { app.clipboard.state.collect { if (clipboardShowing) clipboardHistory() } }
         scope.launch { app.clipboard.clearEvents.collect { clearMediaHistory(); if (clipboardShowing) clipboardHistory() } }
         scope.launch { app.japaneseDictionary.engine.collect { refreshCandidates() } }
@@ -1002,11 +1002,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
 
     private fun clearScreenshot() {
-        val hadScreenshot=displayedScreenshot!=null
         displayedScreenshot=null
-        screenshotThumbnail=null
         ui?.showClipboardPreview(null,null,screenshot=true)
-        if (hadScreenshot && clipboardShowing && clipboardEligible()) clipboardHistory()
     }
 
     private fun refreshScreenshot() {
@@ -1023,8 +1020,10 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val editorSession=session
         screenshotJob=scope.launch {
             delay(150)
-            val recent=withContext(Dispatchers.IO) { runCatching { RecentScreenshot.find(this@DualKeyService) }.getOrNull() }
+            val found=withContext(Dispatchers.IO) { runCatching { RecentScreenshot.find(this@DualKeyService) }.getOrDefault(emptyList()) }
             if (session!=editorSession || !canPreviewScreenshot()) return@launch
+            app.clipboard.rememberScreenshots(found)
+            val recent=found.firstOrNull()
             if (recent==null || recent==dismissedScreenshot) {
                 clearScreenshot()
                 return@launch
@@ -1036,8 +1035,6 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                     return@launch
                 }
                 displayedScreenshot=recent
-                screenshotThumbnail=bitmap
-                if (clipboardShowing) clipboardHistory()
                 ui?.showClipboardPreview(bitmap,"撮ったスクショを貼り付け",{
                     if (displayedScreenshot==recent && session==editorSession && canPreviewScreenshot() &&
                         System.currentTimeMillis()<recent.expiresAt) {
@@ -1054,7 +1051,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
 
     private fun pasteScreenshot(recent: RecentScreenshot) {
-        if (displayedScreenshot!=recent || !canPreviewScreenshot() || System.currentTimeMillis()>=recent.expiresAt) return
+        if (!canPreviewScreenshot()) return
         val clip=ClipData("スクリーンショット",arrayOf(recent.mime),ClipData.Item(recent.uri))
         pasteClipboardMedia(clip,screenshot=true)
     }
@@ -1093,9 +1090,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             Toast.makeText(this,"この入力欄ではクリップボード履歴を表示しません",Toast.LENGTH_SHORT).show(); return
         }
         clipboardShowing=true
-        val screenshot=displayedScreenshot?.takeIf {
-            settings.clipboardHistory && canPreviewScreenshot() && System.currentTimeMillis()<it.expiresAt
-        }
+        val screenshots=if (settings.clipboardHistory && canPreviewScreenshot())
+            app.clipboard.screenshotState.value.take(settings.clipboardLimit) else emptyList()
         ui?.showClipboard(app.clipboard.current(),settings.clipboardHistory,
             { entry -> if (entry in app.clipboard.current()) pasteText(entry.text) },
             { entry -> app.clipboard.remove(entry) },
@@ -1104,8 +1100,17 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             currentMedia(), settings.clipboardLimit,
             { entry -> if (currentMedia().any { it.media==entry.media }) sendMedia(entry.media) },
             { entry -> mediaHistory=mediaHistory.filterNot { it.media==entry.media }; app.clipboardMedia.discard(entry.media); clipboardHistory() },
-            screenshot?.let { recent -> { pasteScreenshot(recent) } },screenshotThumbnail,
-            { dismissedScreenshot=screenshot; clearScreenshot() })
+            screenshots,::pasteScreenshot,
+            { entry ->
+                if (entry==displayedScreenshot) { dismissedScreenshot=entry; clearScreenshot() }
+                app.clipboard.removeScreenshot(entry)
+            },
+            { entry,view ->
+                scope.launch {
+                    val bitmap=app.clipboardMedia.clipboardThumbnail(entry.uri,entry.mime)
+                    if (view.tag==entry && canPreviewScreenshot()) view.setImageBitmap(bitmap)
+                }
+            })
     }
     private fun moveCursor(step: Int) {
         invalidateTranslation()
