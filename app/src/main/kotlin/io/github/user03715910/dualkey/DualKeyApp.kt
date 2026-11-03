@@ -38,6 +38,7 @@ class DualKeyApp : Application() {
         expressions=io.github.user03715910.dualkey.conversion.ExpressionDictionary(this,scope)
         clipboard=io.github.user03715910.dualkey.data.ClipboardHistoryStore(this,scope,settings)
         clipboardMedia // remove expired staging from an earlier process
+        scope.launch { clipboard.clearEvents.filter { it!=0L }.collect { clipboardMedia.clearPinned() } }
         scope.launch { settings.awaitLoaded(); settings.state.map { it.autoCheck }.distinctUntilChanged().collect { UpdateScheduler.schedule(this@DualKeyApp, it) } }
         scope.launch {
             settings.awaitLoaded()

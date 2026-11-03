@@ -13,6 +13,10 @@ import android.util.Size
 import android.webkit.MimeTypeMap
 import androidx.core.content.FileProvider
 import kotlinx.coroutines.*
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import org.json.JSONArray
+import org.json.JSONObject
 import kotlinx.coroutines.sync.Mutex
 import kotlinx.coroutines.sync.withLock
 import java.io.File
@@ -21,7 +25,7 @@ import java.util.UUID
 class ClipboardMediaProvider : FileProvider()
 
 data class SharedMedia(val file: File,val uri: Uri,val mime: String,val expires: Long)
-data class MediaHistoryEntry(val media: SharedMedia,val preview: Bitmap?,val copiedAt: Long)
+data class MediaHistoryEntry(val media: SharedMedia,val preview: Bitmap?,val copiedAt: Long,val pinned: Boolean=false)
 
 /** Private, bounded staging for paste and opt-in clipboard history. */
 class ClipboardMedia(private val context: Context,private val scope: CoroutineScope) {
@@ -33,6 +37,54 @@ class ClipboardMedia(private val context: Context,private val scope: CoroutineSc
     private val maxTotal=64L*1024*1024
     private val staging=mutableSetOf<File>()
 
+    private val pinnedDirectory=File(context.filesDir,"ime-pinned")
+    private val pinnedPrefs=context.getSharedPreferences("pinned-clipboard-media",Context.MODE_PRIVATE)
+    private val pinned=MutableStateFlow(runCatching {
+        val json=JSONArray(pinnedPrefs.getString("entries","[]"))
+        (0 until minOf(json.length(),20)).mapNotNull { i ->
+            val item=json.getJSONObject(i)
+            val name=item.getString("file")
+            val mime=item.getString("mime")
+            val file=File(pinnedDirectory,name)
+            if (file.parentFile!=pinnedDirectory || name!=file.name || !file.isFile || !isMedia(mime)) null
+            else MediaHistoryEntry(SharedMedia(file,FileProvider.getUriForFile(context,authority,file),mime,Long.MAX_VALUE),
+                null,item.getLong("time"),true)
+        }
+    }.getOrDefault(emptyList()))
+    val pinnedEntries=pinned.asStateFlow()
+    private fun savePinned(entries: List<MediaHistoryEntry>) {
+        val json=JSONArray()
+        entries.forEach { json.put(JSONObject().put("file",it.media.file.name).put("mime",it.media.mime).put("time",it.copiedAt)) }
+        check(pinnedPrefs.edit().putString("entries",json.toString()).commit())
+        pinned.value=entries
+    }
+
+    suspend fun pin(entry: MediaHistoryEntry) = withContext(Dispatchers.IO) {
+        mutex.withLock {
+            val source=entry.media
+            if (pinned.value.any { it.copiedAt==entry.copiedAt }) return@withLock
+            require(source.file.parentFile==directory && source.file.length() in 1..maxItem &&
+                System.currentTimeMillis()<source.expires && pinned.value.size<20 &&
+                pinnedDirectory.listFiles().orEmpty().sumOf { it.length() }+source.file.length()<=maxTotal)
+            check(pinnedDirectory.isDirectory || pinnedDirectory.mkdirs())
+            val file=File(pinnedDirectory,source.file.name)
+            try {
+                source.file.copyTo(file,overwrite=true)
+                val media=SharedMedia(file,FileProvider.getUriForFile(context,authority,file),source.mime,Long.MAX_VALUE)
+                savePinned(listOf(entry.copy(media=media,pinned=true))+pinned.value)
+            } catch (e: Exception) { delete(file); throw e }
+        }
+    }
+
+    fun unpin(entry: MediaHistoryEntry) { scope.launch(Dispatchers.IO) { mutex.withLock {
+        if (entry !in pinned.value) return@withLock
+        runCatching { savePinned(pinned.value-entry); delete(entry.media.file) }
+    } } }
+
+    fun clearPinned() { scope.launch(Dispatchers.IO) { mutex.withLock {
+        runCatching { savePinned(emptyList()); pinnedDirectory.listFiles().orEmpty().forEach(::delete) }
+    } } }
+
     init { scope.launch(Dispatchers.IO) { mutex.withLock { prune() } } }
 
     private fun prune() {
@@ -42,7 +94,7 @@ class ClipboardMedia(private val context: Context,private val scope: CoroutineSc
     }
 
     private fun delete(file: File) {
-        if (file.parentFile!=directory) return
+        if (file.parentFile!=directory && file.parentFile!=pinnedDirectory) return
         runCatching { context.revokeUriPermission(FileProvider.getUriForFile(context,authority,file),android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION) }
         file.delete()
     }

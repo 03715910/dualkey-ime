@@ -159,9 +159,13 @@ class ImeVisibilityDeviceTest {
             await("PNG received from preview") { mediaResult().contains("image/png; match=true") }
             click("copy-test.jpeg")
             keyboardAction("コピープレビューを閉じる")
-            keyboardAction("貼り付け",AccessibilityNodeInfo.ACTION_LONG_CLICK)
+            keyboardAction("クリップボード履歴")
+            keyboardAction("履歴を固定")
+            await("JPEG pinned for permanent reuse") {
+                app.clipboardMedia.pinnedEntries.value.any { it.media.mime=="image/jpeg" && it.media.file.isFile }
+            }
             keyboardAction("画像 · JPEG")
-            await("unpasted JPEG received from history") { mediaResult().contains("image/jpeg; match=true") }
+            await("pinned JPEG received from history") { mediaResult().contains("image/jpeg; match=true") }
         } finally { runBlocking { app.settings.set(Prefs.clipboardHistory,false) } }
     }
     @Test fun richEditorReceivesImagesGifAndVideoWithActualReadGrant() {

@@ -16,7 +16,7 @@ import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
 
-data class ClipboardEntry(val text: String,val time: Long)
+data class ClipboardEntry(val text: String,val time: Long,val pinned: Boolean=false)
 
 /** Opt-in, private, 24-hour history. Never includes URIs, intents, or marked-sensitive clips. */
 class ClipboardHistoryStore(context: Context,private val scope: CoroutineScope,private val settings: SettingsStore) {
@@ -38,7 +38,7 @@ class ClipboardHistoryStore(context: Context,private val scope: CoroutineScope,p
     private val clears=MutableStateFlow(0L)
     val clearEvents=clears.asStateFlow()
     fun current(): List<ClipboardEntry> = if (!settings.state.value.clipboardHistory) emptyList() else snapshot.value
-        .filter { System.currentTimeMillis()-it.time in 0..86_400_000L }.take(settings.state.value.clipboardLimit)
+        .filter { it.pinned || System.currentTimeMillis()-it.time in 0..86_400_000L }
     fun prune() { scope.launch(Dispatchers.IO) { loaded.await(); mutex.withLock { snapshot.value=current(); runCatching { persist() } } } }
     @Volatile private var epoch=0L
     init {
@@ -47,11 +47,11 @@ class ClipboardHistoryStore(context: Context,private val scope: CoroutineScope,p
                 settings.awaitLoaded()
                 mutex.withLock {
                     if (settings.state.value.clipboardHistory && file.baseFile.isFile) {
-                        require(file.baseFile.length()<=1_000_000)
+                        require(file.baseFile.length()<=2_000_000)
                         val array=file.openRead().bufferedReader().use { JSONArray(it.readText()) }
-                        snapshot.value=(0 until minOf(array.length(),100)).map { i -> array.getJSONObject(i).let { ClipboardEntry(it.getString("text"),it.getLong("time")) } }
-                            .filter { ClipboardPrivacy.retain(it.text,false) && System.currentTimeMillis()-it.time in 0..86_400_000L }
-                            .distinctBy { it.text }.take(settings.state.value.clipboardLimit)
+                        snapshot.value=(0 until minOf(array.length(),120)).map { i -> array.getJSONObject(i).let { ClipboardEntry(it.getString("text"),it.getLong("time"),it.optBoolean("pinned")) } }
+                            .filter { ClipboardPrivacy.retain(it.text,false) && (it.pinned || System.currentTimeMillis()-it.time in 0..86_400_000L) }
+                            .distinctBy { it.text }
                     }
                     persist()
                 }
@@ -61,7 +61,7 @@ class ClipboardHistoryStore(context: Context,private val scope: CoroutineScope,p
         scope.launch {
             settings.awaitLoaded(); loaded.await()
             settings.state.map { it.clipboardHistory to it.clipboardLimit }.distinctUntilChanged().collect { (enabled,limit) ->
-                if (!enabled) clear() else scope.launch(Dispatchers.IO) { mutex.withLock { snapshot.value=snapshot.value.take(limit); runCatching { persist() } } }
+                if (!enabled) clear() else scope.launch(Dispatchers.IO) { mutex.withLock { snapshot.value=limitEntries(snapshot.value,limit); runCatching { persist() } } }
             }
         }
     }
@@ -98,7 +98,7 @@ class ClipboardHistoryStore(context: Context,private val scope: CoroutineScope,p
 
     private fun persist() {
         if (!settings.state.value.clipboardHistory || snapshot.value.isEmpty()) { file.delete(); return }
-        val array=JSONArray(); snapshot.value.forEach { array.put(JSONObject().put("text",it.text).put("time",it.time)) }
+        val array=JSONArray(); snapshot.value.forEach { array.put(JSONObject().put("text",it.text).put("time",it.time).put("pinned",it.pinned)) }
         val output=file.startWrite()
         try { output.write(array.toString().toByteArray(Charsets.UTF_8)); file.finishWrite(output) }
         catch (e: Exception) { file.failWrite(output); throw e }
@@ -109,11 +109,26 @@ class ClipboardHistoryStore(context: Context,private val scope: CoroutineScope,p
         scope.launch(Dispatchers.IO) { loaded.await(); mutex.withLock {
             if (generation!=epoch || !settings.state.value.clipboardHistory) return@withLock
             val now=System.currentTimeMillis()
-            snapshot.value=(listOf(ClipboardEntry(text,now))+snapshot.value.filter { it.text!=text && now-it.time in 0..86_400_000L })
-                .take(settings.state.value.clipboardLimit)
+            if (snapshot.value.any { it.text==text && it.pinned }) return@withLock
+            snapshot.value=limitEntries(listOf(ClipboardEntry(text,now))+snapshot.value.filter { it.text!=text && (it.pinned || now-it.time in 0..86_400_000L) },settings.state.value.clipboardLimit)
             try { persist() } catch (_: Exception) { snapshot.value=emptyList(); file.delete() }
         } }
     }
+    private fun limitEntries(entries: List<ClipboardEntry>,limit: Int) =
+        entries.filter { it.pinned } + entries.filterNot { it.pinned }.take(limit)
+
+    fun togglePin(entry: ClipboardEntry) {
+        scope.launch(Dispatchers.IO) { loaded.await(); mutex.withLock {
+            val entries=snapshot.value
+            if (!settings.state.value.clipboardHistory || entry !in entries ||
+                (!entry.pinned && entries.count { it.pinned }>=20)) return@withLock
+            snapshot.value=limitEntries(entries.map {
+                if (it==entry) it.copy(pinned=!it.pinned,time=System.currentTimeMillis()) else it
+            },settings.state.value.clipboardLimit)
+            runCatching { persist() }
+        } }
+    }
+
     fun remove(entry: ClipboardEntry) { scope.launch(Dispatchers.IO) { loaded.await(); mutex.withLock {
         snapshot.value=snapshot.value.filterNot { it==entry }; runCatching { persist() }
     } } }
