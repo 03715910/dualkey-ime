@@ -775,6 +775,10 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         } else if (info?.actionLabel != null && info.actionId != 0) currentInputConnection?.performEditorAction(info.actionId)
         else if (!sendDefaultEditorAction(true) && !privateField) currentInputConnection?.commitText("\n",1)
     }
+    private fun useNotesBackspace() =
+        currentInputEditorInfo?.packageName == "com.samsung.android.app.notes" &&
+            composer.isEmpty && englishWord.isEmpty() && variant==null && !converting
+
     private fun delete() {
         invalidateTranslation()
         if (variant!=null) { resetVariant(); resetConversion(); syncComposition(); return }
@@ -784,7 +788,10 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         else {
             committedTail=null
             val ic=currentInputConnection ?: return
-            if (!ic.getSelectedText(0).isNullOrEmpty()) ic.commitText("",1) else ic.deleteSurroundingTextInCodePoints(1,0)
+            // Notes owns object selections such as inserted images. A text-range edit cannot remove them.
+            if (useNotesBackspace()) sendDownUpKeyEvents(KeyEvent.KEYCODE_DEL)
+            else if (!ic.getSelectedText(0).isNullOrEmpty()) ic.commitText("",1)
+            else ic.deleteSurroundingTextInCodePoints(1,0)
         }
         refreshCandidates()
     }
@@ -797,6 +804,10 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         invalidateTranslation(); resetVariant(); composer.replace(s.dropLast(1)+cycle[(cycle.indexOf(last)+1)%cycle.length]); resetConversion(); syncComposition()
     }
     private fun deleteChunk() {
+        if (useNotesBackspace()) {
+            delete()
+            return
+        }
         val connection=currentInputConnection ?: return
         invalidateTranslation(); committedTail=null
         connection.beginBatchEdit()
@@ -1242,7 +1253,14 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 if (converting) syncComposition() else showCandidates()
             }
             keyCode==KeyEvent.KEYCODE_ENTER || keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER -> enter(true,event.isShiftPressed)
-            keyCode==KeyEvent.KEYCODE_DEL -> delete()
+            keyCode==KeyEvent.KEYCODE_DEL -> {
+                if (useNotesBackspace()) {
+                    invalidateTranslation()
+                    committedTail=null
+                    refreshCandidates()
+                    handled=false
+                } else delete()
+            }
             keyCode==KeyEvent.KEYCODE_ESCAPE && (continuationCandidates || !composer.isEmpty || englishWord.isNotEmpty()) -> {
                 invalidateTranslation()
                 if (composer.isEmpty && englishWord.isEmpty()) { committedTail=null; resetConversion(); refreshCandidates() }
