@@ -1049,9 +1049,11 @@ class DeviceInputTest {
             await("search editor ready") { "action=3" in diagnostic() && "predictions=false" in diagnostic() }
             val sample="検索欄への貼り付け"
             copy(sample)
-            touch(rect("貼り付け"))
-            assertEquals(sample,inputText())
-            hold(rect("貼り付け"))
+            clickLabel("貼り付け")
+            await("search clipboard text committed") { inputText()==sample }
+            await("open search clipboard history") {
+                findNode { it.text?.toString()=="貼り付け" }?.performAction(AccessibilityNodeInfo.ACTION_LONG_CLICK)==true
+            }
             await("search clipboard history") { findNode { it.text?.toString()==sample }!=null }
         } finally { runBlocking { app.settings.set(Prefs.clipboardHistory,false) } }
     }
