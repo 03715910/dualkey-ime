@@ -60,6 +60,10 @@ class MainActivity : AppCompatActivity() {
     private var updateDialog: AlertDialog?=null
     private var permissionDialog: AlertDialog?=null
     private var shortcutDialog: AlertDialog?=null
+    private val screenshotPermission=registerForActivityResult(ActivityResultContracts.RequestMultiplePermissions()) {
+        if (RecentScreenshot.hasAccess(this)) save(Prefs.recentScreenshots,true)
+        else toast("スクショの自動候補には、すべての写真へのアクセス許可が必要です")
+    }
     private val permissionLauncher=registerForActivityResult(ActivityResultContracts.StartActivityForResult()) {
         val requested=awaitingPermissionResult && installWhenReady && page==Page.UPDATES
         awaitingPermissionResult=false
@@ -272,6 +276,20 @@ class MainActivity : AppCompatActivity() {
             text("未確定の日本語はまず確定します。物理Shift＋Enterは改行です。送信は入力先がSENDを通知する欄で行います。LINEなどの実際の対応はアプリ側の設定・仕様によります。検索・URL・パスワード欄では入力先のアクションを優先します。")
         }
         section("貼り付けと履歴") {
+            if (Build.VERSION.SDK_INT>=29) {
+                if (s.recentScreenshots && RecentScreenshot.hasAccess(this)) {
+                    toggle("撮ったスクショを候補に出す",Prefs.recentScreenshots,true)
+                } else {
+                    button("撮ったスクショを候補に出す") {
+                        if (RecentScreenshot.hasAccess(this)) save(Prefs.recentScreenshots,true)
+                        else screenshotPermission.launch(
+                            if (Build.VERSION.SDK_INT>=34) arrayOf(RecentScreenshot.permission(),Manifest.permission.READ_MEDIA_VISUAL_USER_SELECTED)
+                            else arrayOf(RecentScreenshot.permission())
+                        )
+                    }
+                }
+                text("オンにするには、すべての写真へのアクセス許可が必要です。キーボード表示中に直近2分のスクショを候補に出し、画像はタップしたときに貼り付けます。")
+            }
             toggle("クリップボード履歴を保存",Prefs.clipboardHistory,s.clipboardHistory)
             text("コピーしたメディアはキーボードの表示中にプレビューします。履歴をONにすると、対応メディアも端末内の一時領域に保存します。")
             slider("履歴の最大件数",Prefs.clipboardLimit,s.clipboardLimit,5,100)

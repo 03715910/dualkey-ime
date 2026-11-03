@@ -2,6 +2,8 @@ package io.github.user03715910.dualkey.ime
 
 import android.content.*
 import android.content.res.Configuration
+import android.database.ContentObserver
+import android.net.Uri
 import android.hardware.input.InputManager
 import android.inputmethodservice.InputMethodService
 import android.media.AudioManager
@@ -95,6 +97,13 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var mediaHistory=emptyList<MediaHistoryEntry>()
     private var mediaHistoryEpoch=0L
     private var clipboardPreviewJob: Job?=null
+    private var screenshotJob: Job?=null
+    private var screenshotObserverRegistered=false
+    private var displayedScreenshot: RecentScreenshot?=null
+    private var dismissedScreenshot: RecentScreenshot?=null
+    private val screenshotObserver=object : ContentObserver(Handler(Looper.getMainLooper())) {
+        override fun onChange(selfChange: Boolean) { refreshScreenshot() }
+    }
     private var previewTimestamp=-1L
     private var dismissedPreview=-1L
     private var observedMedia=-1L
@@ -148,6 +157,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             rebuild()
             refreshCandidates()
             applyVisibility(false)
+            refreshScreenshot()
         } }
         scope.launch { ImeControl.requests.collect { request -> if (request!=null && hasEditor()) applyDisplayRequest(request) } }
     }
@@ -160,6 +170,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         if (!ownHidePending && SystemClock.uptimeMillis()>=ownHideSettlesAt) displayRetry?.cancel()
         updateNavigationAppearance(); publishVisibility()
         refreshClipboardPreview()
+        refreshScreenshot()
         window?.window?.decorView?.post { updateCaptionVisibility() }
     }
     override fun onWindowHidden() {
@@ -170,6 +181,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         ownHidePending=false
         lifecycleState("hidden(own=$expected)")
         windowShown=false; clearClipboardPreview(); hardwareCandidates=false; candidateHostRequested=false; hardwarePanel.dismiss()
+        stopScreenshot()
         if (!changingConfiguration && !expected) systemDismissed()
         publishVisibility(); super.onWindowHidden()
     }
@@ -193,6 +205,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         }
     }
     override fun onFinishInputView(finishingInput: Boolean) {
+        stopScreenshot()
         // Hiding only the UI must not finish the composing span owned by the still-active IME.
         if (finishingInput) super.onFinishInputView(true)
     }
@@ -243,6 +256,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         return (visibility.mode != DisplayMode.HIDDEN && editorRequested) || candidateHostRequested
     }
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
+        stopScreenshot()
         val key=EditorKey(attribute.packageName,attribute.fieldId,attribute.inputType,attribute.imeOptions)
         val owned=if (english) englishWord else displayedComposition()
         val same=restarting && inputStarted && editorKey==key
@@ -308,11 +322,12 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info,restarting)
         if (hasEditor() && visibility.mode!=DisplayMode.HIDDEN) editorRequested=true
-        rebuild(); refreshCandidates(); publishVisibility(); refreshClipboardPreview()
+        rebuild(); refreshCandidates(); publishVisibility(); refreshClipboardPreview(); refreshScreenshot()
     }
     override fun onFinishInput() {
         lifecycleState("finish")
         clearClipboardPreview()
+        stopScreenshot()
         runCatching { currentInputConnection?.requestCursorUpdates(0) }
         commitComposition(); finishEnglish()
         currentInputConnection?.finishComposingText()
@@ -323,12 +338,14 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     override fun onUnbindInput() {
         lifecycleState("unbind")
         clearClipboardPreview()
+        stopScreenshot()
         // The old connection can outlive its client; never let a delayed show use it.
         inputStarted=false; editorKey=null; editorRequested=false; ImeControl.inputActive=false
         session++; displayEpoch++; displayRetry?.cancel(); clearState(); applyVisibility(false)
         super.onUnbindInput()
     }
     override fun onDestroy() {
+        stopScreenshot()
         clipboardManager.removePrimaryClipChangedListener(clipboardListener)
         hardwarePanel.dismiss()
         inputManager.unregisterInputDeviceListener(this)
@@ -912,10 +929,10 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     private fun clipboardMessage(message: String) = Toast.makeText(this,message,Toast.LENGTH_SHORT).show()
 
-    private fun pasteClipboardMedia(clip: ClipData) {
+    private fun pasteClipboardMedia(clip: ClipData, screenshot: Boolean=false) {
         if (mediaPasteJob?.isActive==true) { clipboardMessage("メディアを準備中です"); return }
         val timestamp=clip.description.timestamp
-        val saved=currentMedia().firstOrNull { it.copiedAt==timestamp }
+        val saved=if (screenshot) null else currentMedia().firstOrNull { it.copiedAt==timestamp }
         if (saved!=null) {
             sendMedia(saved.media)
             return
@@ -927,7 +944,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val connection=currentInputConnection ?: return
         val accepted=currentInputEditorInfo?.contentMimeTypes
         if (accepted.isNullOrEmpty()) { clipboardMessage("この入力欄はメディアを受け取れません。アプリの添付ボタンをお使いください"); return }
-        val privateClip=clip.description.timestamp==blockedClipTimestamp ||
+        val privateClip=screenshot || clip.description.timestamp==blockedClipTimestamp ||
             clip.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE",false)==true
         fun current() = session==inputSession && revision==inputRevision && selectionEpoch==inputSelection && hasEditor() &&
             currentInputConnection===connection && !sensitive && !numeric &&
@@ -958,6 +975,69 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             } catch (e: CancellationException) { throw e }
             catch (_: Exception) { if (current()) clipboardMessage("メディアを読み取れないか、容量上限（1件32 MiB）を超えています。アプリから添付してください") }
             finally { if (!delivered) staged?.let(app.clipboardMedia::discard) }
+        }
+    }
+
+    private fun canPreviewScreenshot() = settings.recentScreenshots && windowShown && isInputViewShown &&
+        visibility.mode!=DisplayMode.HIDDEN && clipboardEligible() && RecentScreenshot.hasAccess(this)
+
+    private fun stopScreenshot() {
+        screenshotJob?.cancel()
+        screenshotJob=null
+        if (screenshotObserverRegistered) {
+            contentResolver.unregisterContentObserver(screenshotObserver)
+            screenshotObserverRegistered=false
+        }
+        clearScreenshot()
+    }
+
+    private fun clearScreenshot() {
+        displayedScreenshot=null
+        ui?.showClipboardPreview(null,null,screenshot=true)
+    }
+
+    private fun refreshScreenshot() {
+        if (!canPreviewScreenshot()) {
+            stopScreenshot()
+            return
+        }
+        if (!screenshotObserverRegistered) {
+            screenshotObserverRegistered=runCatching {
+                contentResolver.registerContentObserver(Uri.parse("content://media"),true,screenshotObserver)
+            }.isSuccess
+        }
+        screenshotJob?.cancel()
+        val editorSession=session
+        screenshotJob=scope.launch {
+            delay(150)
+            val recent=withContext(Dispatchers.IO) { runCatching { RecentScreenshot.find(this@DualKeyService) }.getOrNull() }
+            if (session!=editorSession || !canPreviewScreenshot()) return@launch
+            if (recent==null || recent==dismissedScreenshot) {
+                clearScreenshot()
+                return@launch
+            }
+            if (recent!=displayedScreenshot) {
+                val bitmap=app.clipboardMedia.clipboardThumbnail(recent.uri,recent.mime)
+                if (session!=editorSession || !canPreviewScreenshot() || System.currentTimeMillis()>=recent.expiresAt) {
+                    clearScreenshot()
+                    return@launch
+                }
+                displayedScreenshot=recent
+                ui?.showClipboardPreview(bitmap,"撮ったスクショを貼り付け",{
+                    if (displayedScreenshot==recent && session==editorSession && canPreviewScreenshot() &&
+                        System.currentTimeMillis()<recent.expiresAt) {
+                        dismissedScreenshot=recent
+                        clearScreenshot()
+                        val clip=ClipData("スクリーンショット",arrayOf(recent.mime),ClipData.Item(recent.uri))
+                        pasteClipboardMedia(clip,screenshot=true)
+                    }
+                },{
+                    dismissedScreenshot=recent
+                    clearScreenshot()
+                },screenshot=true)
+            }
+            delay((recent.expiresAt-System.currentTimeMillis()).coerceAtLeast(0))
+            if (displayedScreenshot==recent) clearScreenshot()
         }
     }
 

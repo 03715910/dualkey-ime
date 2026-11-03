@@ -40,6 +40,10 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         layoutParams=LinearLayout.LayoutParams(-1,dp(40))
         visibility=View.GONE
     }.also { root.addView(it,root.indexOfChild(toolbar)+1) }
+    private val screenshotPreview=LinearLayout(context).apply {
+        layoutParams=LinearLayout.LayoutParams(-1,dp(40))
+        visibility=View.GONE
+    }.also { root.addView(it,root.indexOfChild(clipboardPreview)+1) }
     private var candidateExpanded = false
     private var previousCandidates=emptyList<String>()
     private var dictionaryNotice = ""
@@ -324,7 +328,8 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         } })
     }
     fun hideTranslation() { translationPanel.visibility=View.GONE; translationPanel.removeAllViews(); updateBody() }
-    fun showClipboardPreview(bitmap: android.graphics.Bitmap?,label: String?,paste: ()->Unit = {},dismiss: ()->Unit = {}) {
+    fun showClipboardPreview(bitmap: android.graphics.Bitmap?,label: String?,paste: ()->Unit = {},dismiss: ()->Unit = {},screenshot: Boolean=false) {
+        val clipboardPreview=if (screenshot) screenshotPreview else this.clipboardPreview
         clipboardPreview.removeAllViews()
         clipboardPreview.visibility=if (label==null) View.GONE else View.VISIBLE
         if (label==null) return
@@ -332,7 +337,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             layoutParams=LinearLayout.LayoutParams(dp(44),-1)
             scaleType=ImageView.ScaleType.FIT_CENTER
             setImageBitmap(bitmap)
-            contentDescription="コピーしたメディアのプレビュー"
+            contentDescription=if (screenshot) "撮ったスクショのプレビュー" else "コピーしたメディアのプレビュー"
             setOnClickListener { paste() }
         })
         clipboardPreview.addView(button(label,"noop",small=true).apply {
@@ -341,7 +346,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         })
         clipboardPreview.addView(button("×","noop",small=true).apply {
             layoutParams=LinearLayout.LayoutParams(dp(44),-1)
-            contentDescription="コピープレビューを閉じる"
+            contentDescription=if (screenshot) "スクショのプレビューを閉じる" else "コピープレビューを閉じる"
             setOnClickListener { dismiss() }
         })
     }

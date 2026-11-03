@@ -120,6 +120,21 @@ class ImeVisibilityDeviceTest {
         await("keyboard action $label") { automation.windows.filter { it.type==android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
             .firstNotNullOfOrNull { find(it.root) }?.performAction(action)==true }
     }
+    @Test fun recentScreenshotPastesWithoutAnImageOnClipboard() {
+        org.junit.Assume.assumeTrue(android.os.Build.VERSION.SDK_INT>=33)
+        org.junit.Assume.assumeTrue(app.checkSelfPermission(android.Manifest.permission.READ_MEDIA_IMAGES)==PackageManager.PERMISSION_GRANTED)
+        runBlocking { app.settings.set(Prefs.recentScreenshots,true); app.settings.state.first { it.recentScreenshots } }
+        try {
+            launch("images"); await("image editor window focused") { fixtureState().contains("windowFocus=true") }; edit()
+            click("save-screenshot")
+            assertTrue(mediaResult(),mediaResult().contains("FixtureMedia: none"))
+            keyboardAction("撮ったスクショのプレビュー")
+            await("screenshot received from MediaStore") { mediaResult().contains("image/png; match=true") }
+        } finally {
+            click("delete-screenshot")
+            runBlocking { app.settings.set(Prefs.recentScreenshots,false) }
+        }
+    }
     @Test fun copiedImagePreviewAndUnpastedMediaHistoryCanSendSequentially() {
         runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
         try {

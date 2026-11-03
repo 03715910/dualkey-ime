@@ -122,6 +122,8 @@ public class LifecycleFixtureActivity extends Activity {
         if (value.equals("reset-media")) { received="none"; return; }
         switch(value) {
             case "edit": beginInput(); break;
+            case "save-screenshot": saveScreenshot(); break;
+            case "delete-screenshot": deleteScreenshot(); break;
             case "end-input": endInput(); break;
             case "landscape": setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_LANDSCAPE); break;
             case "portrait": setRequestedOrientation(ActivityInfo.SCREEN_ORIENTATION_PORTRAIT); break;
@@ -136,6 +138,39 @@ public class LifecycleFixtureActivity extends Activity {
         byte[] buffer=new byte[8192]; int n;
         while ((n=input.read(buffer))!=-1) { data.write(buffer,0,n); if (data.size()>2*1024*1024) throw new IOException("fixture size"); }
         return data.toByteArray();
+    }
+    private Uri testScreenshot;
+    private void deleteScreenshot() {
+        if (testScreenshot != null) {
+            getContentResolver().delete(testScreenshot, null, null);
+            testScreenshot = null;
+        }
+    }
+    private void saveScreenshot() {
+        if (Build.VERSION.SDK_INT < 29) return;
+        deleteScreenshot();
+        try {
+            android.graphics.Bitmap bitmap = android.graphics.Bitmap.createBitmap(16, 16, android.graphics.Bitmap.Config.ARGB_8888);
+            bitmap.eraseColor(android.graphics.Color.BLUE);
+            ByteArrayOutputStream png = new ByteArrayOutputStream();
+            bitmap.compress(android.graphics.Bitmap.CompressFormat.PNG, 100, png);
+            bitmap.recycle();
+            expectedMedia = png.toByteArray();
+            received = "none";
+            getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newPlainText("test", "unchanged text"));
+            android.content.ContentValues values = new android.content.ContentValues();
+            values.put("relative_path", "Pictures/Screenshots");
+            values.put("_display_name", "DualKeyScreenshotFixture.png");
+            values.put("mime_type", "image/png");
+            values.put("is_pending", 1);
+            testScreenshot = getContentResolver().insert(android.provider.MediaStore.Images.Media.EXTERNAL_CONTENT_URI, values);
+            try (OutputStream output = getContentResolver().openOutputStream(testScreenshot)) {
+                output.write(expectedMedia);
+            }
+            values.clear();
+            values.put("is_pending", 0);
+            getContentResolver().update(testScreenshot, values, null, null);
+        } catch (Exception e) { received = "screenshot-error"; }
     }
     private void copyMedia(String name) {
         try {
