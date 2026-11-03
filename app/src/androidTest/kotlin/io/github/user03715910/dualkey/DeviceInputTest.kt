@@ -1036,6 +1036,25 @@ class DeviceInputTest {
         key(KeyEvent.KEYCODE_SPACE)
         assertEquals("aAbAa ",inputText())
     }
+    @Test fun searchEditorCanPasteAndOpenClipboardHistory() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        try {
+            main {
+                editor.inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS
+                editor.imeOptions=android.view.inputmethod.EditorInfo.IME_ACTION_SEARCH or
+                    android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
+            }
+            await("search editor ready") { "action=3" in diagnostic() && "predictions=false" in diagnostic() }
+            val sample="検索欄への貼り付け"
+            copy(sample)
+            touch(rect("貼り付け"))
+            assertEquals(sample,inputText())
+            hold(rect("貼り付け"))
+            await("search clipboard history") { findNode { it.text?.toString()==sample }!=null }
+        } finally { runBlocking { app.settings.set(Prefs.clipboardHistory,false) } }
+    }
     @Test fun searchEditorWithoutSuggestionsStillConvertsJapanese() {
         main {
             editor.inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS

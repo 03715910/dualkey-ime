@@ -123,16 +123,24 @@ class ImeVisibilityDeviceTest {
     @Test fun recentScreenshotPastesWithoutAnImageOnClipboard() {
         org.junit.Assume.assumeTrue(android.os.Build.VERSION.SDK_INT>=33)
         org.junit.Assume.assumeTrue(app.checkSelfPermission(android.Manifest.permission.READ_MEDIA_IMAGES)==PackageManager.PERMISSION_GRANTED)
-        runBlocking { app.settings.set(Prefs.recentScreenshots,true); app.settings.state.first { it.recentScreenshots } }
+        runBlocking {
+            app.settings.set(Prefs.clipboardHistory,true)
+            app.settings.set(Prefs.recentScreenshots,true)
+            app.settings.state.first { it.recentScreenshots && it.clipboardHistory }
+        }
         try {
             launch("images"); await("image editor window focused") { fixtureState().contains("windowFocus=true") }; edit()
             click("save-screenshot")
             assertTrue(mediaResult(),mediaResult().contains("FixtureMedia: none"))
             keyboardAction("撮ったスクショのプレビュー")
             await("screenshot received from MediaStore") { mediaResult().contains("image/png; match=true") }
+            click("reset-media")
+            keyboardAction("貼り付け",AccessibilityNodeInfo.ACTION_LONG_CLICK)
+            keyboardAction("履歴：撮ったスクショを貼り付け")
+            await("screenshot received from history") { mediaResult().contains("image/png; match=true") }
         } finally {
             click("delete-screenshot")
-            runBlocking { app.settings.set(Prefs.recentScreenshots,false) }
+            runBlocking { app.settings.set(Prefs.recentScreenshots,false); app.settings.set(Prefs.clipboardHistory,false) }
         }
     }
     @Test fun copiedImagePreviewAndUnpastedMediaHistoryCanSendSequentially() {

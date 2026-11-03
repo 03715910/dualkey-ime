@@ -101,6 +101,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var screenshotJob: Job?=null
     private var screenshotObserverRegistered=false
     private var displayedScreenshot: RecentScreenshot?=null
+    private var screenshotThumbnail: android.graphics.Bitmap?=null
     private var dismissedScreenshot: RecentScreenshot?=null
     private val screenshotObserver=object : ContentObserver(Handler(Looper.getMainLooper())) {
         override fun onChange(selfChange: Boolean) { refreshScreenshot() }
@@ -108,10 +109,11 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var previewTimestamp=-1L
     private var dismissedPreview=-1L
     private var observedMedia=-1L
+    private var observedText=-1L
     private var selectionEpoch=0L
     private var blockedClipTimestamp=-1L
     private val clipboardListener=ClipboardManager.OnPrimaryClipChangedListener {
-        if (settings.clipboardHistory && hasEditor() && !clipboardEligible()) {
+        if (hasEditor() && !clipboardEligible()) {
             blockedClipTimestamp=runCatching { clipboardManager.primaryClipDescription?.timestamp }.getOrNull() ?: -1L
         } else if (windowShown && clipboardEligible()) {
             captureClipboard()
@@ -170,6 +172,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         if (isInputViewShown) editorRequested=true
         if (!ownHidePending && SystemClock.uptimeMillis()>=ownHideSettlesAt) displayRetry?.cancel()
         updateNavigationAppearance(); publishVisibility()
+        captureClipboard()
         refreshClipboardPreview()
         refreshScreenshot()
         window?.window?.decorView?.post { updateCaptionVisibility() }
@@ -326,7 +329,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     override fun onStartInputView(info: EditorInfo, restarting: Boolean) {
         super.onStartInputView(info,restarting)
         if (hasEditor() && visibility.mode!=DisplayMode.HIDDEN) editorRequested=true
-        rebuild(); refreshCandidates(); publishVisibility(); refreshClipboardPreview(); refreshScreenshot()
+        rebuild(); refreshCandidates(); publishVisibility(); captureClipboard(); refreshClipboardPreview(); refreshScreenshot()
     }
     override fun onFinishInput() {
         lifecycleState("finish")
@@ -811,19 +814,24 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         } finally { connection.endBatchEdit() }
         refreshCandidates()
     }
-    private fun clipboardEligible() = hasEditor() && !sensitive && !numeric && learningAllowed && !getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
-    private fun clipboardText(): Pair<String,Boolean>? {
-        if (getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) return null
-        return try {
-        val clip=clipboardManager.primaryClip
-        val value=if (clip!=null && clip.itemCount>0) clip.getItemAt(0).text?.toString() else null
-        if (value.isNullOrEmpty() || value.length>1_000_000) null
-        else value to (clip?.description?.extras?.getBoolean("android.content.extra.IS_SENSITIVE",false)==true || clip?.description?.timestamp==blockedClipTimestamp)
-        } catch (_: Exception) { null }
+    // Clipboard history is opt-in and independent of the editor's prediction and learning flags.
+    private fun clipboardEligible() = hasEditor() && !sensitive && !numeric &&
+        !getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
+    private fun clipboardText(clip: ClipData?): Pair<String,Boolean>? {
+        if (clip==null || clip.itemCount==0) return null
+        val value=clip.getItemAt(0).text?.toString()
+        if (value.isNullOrEmpty() || value.length>1_000_000) return null
+        val privateClip=clip.description.extras?.getBoolean("android.content.extra.IS_SENSITIVE",false)==true ||
+            clip.description.timestamp==blockedClipTimestamp
+        return value to privateClip
     }
     private fun captureClipboard() {
         if (!settings.clipboardHistory || !clipboardEligible()) return
-        clipboardText()?.let { (text,sensitiveClip) -> app.clipboard.add(text,sensitiveClip) }
+        val clip=runCatching { clipboardManager.primaryClip }.getOrNull() ?: return
+        val timestamp=clip.description.timestamp
+        if (timestamp==observedText) return
+        observedText=timestamp
+        clipboardText(clip)?.let { (text,sensitiveClip) -> app.clipboard.add(text,sensitiveClip) }
     }
     private fun clearClipboardPreview() {
         clipboardPreviewJob?.cancel()
@@ -836,16 +844,15 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         if (!windowShown || !clipboardEligible() || visibility.mode==DisplayMode.HIDDEN) return
         val description=runCatching { clipboardManager.primaryClipDescription }.getOrNull()
         val timestamp=description?.timestamp ?: -1L
-        if (description==null || timestamp==blockedClipTimestamp || timestamp==dismissedPreview ||
-            description.extras?.getBoolean("android.content.extra.IS_SENSITIVE",false)==true ||
-            !(description.hasMimeType("image/*") || description.hasMimeType("video/*"))) {
+        if (description==null || timestamp==blockedClipTimestamp ||
+            description.extras?.getBoolean("android.content.extra.IS_SENSITIVE",false)==true) {
             clearClipboardPreview()
             return
         }
         if (timestamp==previewTimestamp) return
         clearClipboardPreview()
         val clip=runCatching { clipboardManager.primaryClip }.getOrNull() ?: return
-        if (clip.description.timestamp!=timestamp) return
+        if (clip.description.timestamp!=timestamp || !ClipboardMedia.mayContainMedia(clip)) return
         previewTimestamp=timestamp
         val editorSession=session
         val historyEpoch=mediaHistoryEpoch
@@ -863,7 +870,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                     mime.startsWith("video/") -> "動画"
                     else -> "画像"
                 }
-                ui?.showClipboardPreview(thumbnail,"コピーした${kind}を貼り付け",{
+                if (timestamp!=dismissedPreview) ui?.showClipboardPreview(thumbnail,"コピーした${kind}を貼り付け",{
                     if (current()) {
                         dismissedPreview=timestamp
                         ui?.showClipboardPreview(null,null)
@@ -874,11 +881,11 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                     ui?.showClipboardPreview(null,null)
                 })
                 if (settings.clipboardHistory && timestamp!=observedMedia && historyEpoch==mediaHistoryEpoch) {
-                    observedMedia=timestamp
                     val media=app.clipboardMedia.stage(uri,mime,settings.clipboardMediaMinutes)
                     staged=media
                     val historyPreview=thumbnail ?: app.clipboardMedia.thumbnail(media)
                     if (current() && settings.clipboardHistory && historyEpoch==mediaHistoryEpoch) {
+                        observedMedia=timestamp
                         if (rememberMedia(MediaHistoryEntry(media,historyPreview,timestamp))) staged=null
                     }
                 }
@@ -919,16 +926,15 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         refreshCandidates()
     }
     private fun pasteClipboard() {
-        if (hasEditor() && !sensitive && !numeric && !getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) {
-            val data=runCatching { clipboardManager.primaryClip }.getOrNull()
-            if (data!=null && data.itemCount>0 && data.getItemAt(0).uri?.scheme=="content" &&
-                (data.description.hasMimeType("image/*") || data.description.hasMimeType("video/*"))) {
-                pasteClipboardMedia(data)
-                return
-            }
+        if (getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked) return
+        val data=runCatching { clipboardManager.primaryClip }.getOrNull()
+        if (clipboardEligible() && data!=null && ClipboardMedia.mayContainMedia(data)) {
+            pasteClipboardMedia(data)
+            return
         }
-        val clip=clipboardText()
-        if (clip==null) { Toast.makeText(this,"貼り付けられる文字列がありません",Toast.LENGTH_SHORT).show(); return }
+        if (data==null && runCatching { currentInputConnection?.performContextMenuAction(android.R.id.paste) }.getOrNull()==true) return
+        val clip=clipboardText(data)
+        if (clip==null) { clipboardMessage("貼り付けられる文字列がありません"); return }
         pasteText(clip.first)
     }
     private fun clipboardMessage(message: String) = Toast.makeText(this,message,Toast.LENGTH_SHORT).show()
@@ -996,8 +1002,11 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
 
     private fun clearScreenshot() {
+        val hadScreenshot=displayedScreenshot!=null
         displayedScreenshot=null
+        screenshotThumbnail=null
         ui?.showClipboardPreview(null,null,screenshot=true)
+        if (hadScreenshot && clipboardShowing && clipboardEligible()) clipboardHistory()
     }
 
     private fun refreshScreenshot() {
@@ -1027,13 +1036,12 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                     return@launch
                 }
                 displayedScreenshot=recent
+                screenshotThumbnail=bitmap
+                if (clipboardShowing) clipboardHistory()
                 ui?.showClipboardPreview(bitmap,"撮ったスクショを貼り付け",{
                     if (displayedScreenshot==recent && session==editorSession && canPreviewScreenshot() &&
                         System.currentTimeMillis()<recent.expiresAt) {
-                        dismissedScreenshot=recent
-                        clearScreenshot()
-                        val clip=ClipData("スクリーンショット",arrayOf(recent.mime),ClipData.Item(recent.uri))
-                        pasteClipboardMedia(clip,screenshot=true)
+                        pasteScreenshot(recent)
                     }
                 },{
                     dismissedScreenshot=recent
@@ -1043,6 +1051,12 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             delay((recent.expiresAt-System.currentTimeMillis()).coerceAtLeast(0))
             if (displayedScreenshot==recent) clearScreenshot()
         }
+    }
+
+    private fun pasteScreenshot(recent: RecentScreenshot) {
+        if (displayedScreenshot!=recent || !canPreviewScreenshot() || System.currentTimeMillis()>=recent.expiresAt) return
+        val clip=ClipData("スクリーンショット",arrayOf(recent.mime),ClipData.Item(recent.uri))
+        pasteClipboardMedia(clip,screenshot=true)
     }
 
     private fun sendMedia(media: SharedMedia): Boolean {
@@ -1079,14 +1093,19 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             Toast.makeText(this,"この入力欄ではクリップボード履歴を表示しません",Toast.LENGTH_SHORT).show(); return
         }
         clipboardShowing=true
+        val screenshot=displayedScreenshot?.takeIf {
+            settings.clipboardHistory && canPreviewScreenshot() && System.currentTimeMillis()<it.expiresAt
+        }
         ui?.showClipboard(app.clipboard.current(),settings.clipboardHistory,
             { entry -> if (entry in app.clipboard.current()) pasteText(entry.text) },
             { entry -> app.clipboard.remove(entry) },
-            { clearMediaHistory(); app.clipboard.clear(); clipboardHistory() },
+            { dismissedScreenshot=displayedScreenshot ?: dismissedScreenshot; clearScreenshot(); clearMediaHistory(); app.clipboard.clear(); clipboardHistory() },
             { clipboardShowing=false; ui?.hideTranslation() },
             currentMedia(), settings.clipboardLimit,
             { entry -> if (currentMedia().any { it.media==entry.media }) sendMedia(entry.media) },
-            { entry -> mediaHistory=mediaHistory.filterNot { it.media==entry.media }; app.clipboardMedia.discard(entry.media); clipboardHistory() })
+            { entry -> mediaHistory=mediaHistory.filterNot { it.media==entry.media }; app.clipboardMedia.discard(entry.media); clipboardHistory() },
+            screenshot?.let { recent -> { pasteScreenshot(recent) } },screenshotThumbnail,
+            { dismissedScreenshot=screenshot; clearScreenshot() })
     }
     private fun moveCursor(step: Int) {
         invalidateTranslation()
@@ -1108,7 +1127,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         when (key) {
             "expand_candidates" -> moreCandidates(true)
             "paste" -> pasteClipboard()
-            "clipboard_history" -> { app.clipboard.prune(); clipboardHistory() }
+            "clipboard_history" -> { app.clipboard.prune(); refreshClipboardPreview(); refreshScreenshot(); clipboardHistory() }
             "cycle_script" -> cycleScript()
             "mode" -> switchMode()
             "full" -> chooseDisplay(DisplayMode.FULL)

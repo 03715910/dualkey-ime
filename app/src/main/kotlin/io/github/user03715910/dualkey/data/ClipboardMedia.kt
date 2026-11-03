@@ -54,9 +54,9 @@ class ClipboardMedia(private val context: Context,private val scope: CoroutineSc
         if (uri?.scheme!="content" || uri.authority.isNullOrEmpty() || uri.authority==authority ||
             uri.authority==context.packageName+".updates") return null
         val mime=resolver.getType(uri)?.substringBefore(';')?.trim()?.lowercase() ?: return null
-        if (!isMedia(mime) || (0 until clip.description.mimeTypeCount).none {
+        if (!isMedia(mime) || (!hasGenericUriType(clip.description) && (0 until clip.description.mimeTypeCount).none {
                 ClipDescription.compareMimeTypes(mime,clip.description.getMimeType(it))
-            }) return null
+            })) return null
         return uri to mime
     }
 
@@ -126,6 +126,17 @@ class ClipboardMedia(private val context: Context,private val scope: CoroutineSc
     }
 
     companion object {
+        private fun hasGenericUriType(description: ClipDescription) =
+            description.hasMimeType("text/uri-list") || description.hasMimeType("application/octet-stream")
+
+        fun mayContainMedia(clip: ClipData): Boolean {
+            if (clip.itemCount==0) return false
+            val item=clip.getItemAt(0)
+            return item.uri?.scheme=="content" && (clip.description.hasMimeType("image/*") ||
+                clip.description.hasMimeType("video/*") || (item.text==null && hasGenericUriType(clip.description)))
+        }
+
+
         fun isMedia(mime: String)=(mime.startsWith("image/") || mime.startsWith("video/")) && '*' !in mime &&
             mime.substringAfter('/').matches(Regex("[a-z0-9][a-z0-9.+_-]{0,63}"))
         fun accepts(mime: String,types: Array<out String>?) = isMedia(mime) &&
