@@ -1,6 +1,22 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 17,
+    "versionName": "0.1.14",
+    "releaseDate": "2026-11-03",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.14/DualKeyIME-0.1.14.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "46d218e6ec3e50d3fee687ccf96bf524e5e934d4f67db6e1a4cbd7807068b3ea",
+    "sizeBytes": 101736683,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "「撮ったスクショを候補に出す」を追加。写真へのアクセスを許可すると、コピー操作をせずに保存直後のスクショをキーボードから貼り付けられます。",
+      "設定の「入力とサイズ」→「貼り付けと履歴」から有効にできます。Android 10以降の画像貼り付け対応欄で利用できます。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 16,
     "versionName": "0.1.13",
     "releaseDate": "2026-11-03",
