@@ -1,6 +1,21 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 20,
+    "versionName": "0.1.17",
+    "releaseDate": "2026-11-03",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.17/DualKeyIME-0.1.17.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "5905cb71c6227e09823c56bded5f5a274479544389f502595b22d0c6d0123240",
+    "sizeBytes": 101736683,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "履歴に登録したスクリーンショットを、撮影から2分を過ぎても選べるようにしました。履歴の最大件数内で、元画像が端末にある間利用できます。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 19,
     "versionName": "0.1.16",
     "releaseDate": "2026-11-03",

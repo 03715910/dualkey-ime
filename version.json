@@ -1,16 +1,15 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 19,
-  "versionName": "0.1.16",
+  "versionCode": 20,
+  "versionName": "0.1.17",
   "releaseDate": "2026-11-03",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.16/DualKeyIME-0.1.16.apk",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.17/DualKeyIME-0.1.17.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "52e20705d6b8b7bdc6c15ea9fa4b887d4c58e836fc040b83ed3f38e2bd3d760a",
+  "sha256": "5905cb71c6227e09823c56bded5f5a274479544389f502595b22d0c6d0123240",
   "sizeBytes": 101736683,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "Googleなどの検索欄で、テキストの貼り付けとクリップボード履歴を使えるようにしました。",
-    "コピーした画像の判定を改善し、直近のスクショを履歴画面にも表示します。画像の貼り付けには入力先の対応が必要です。"
+    "履歴に登録したスクリーンショットを、撮影から2分を過ぎても選べるようにしました。履歴の最大件数内で、元画像が端末にある間利用できます。"
   ]
 }
