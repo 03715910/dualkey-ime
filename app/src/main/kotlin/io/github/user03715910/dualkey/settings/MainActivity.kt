@@ -273,8 +273,9 @@ class MainActivity : AppCompatActivity() {
         }
         section("貼り付けと履歴") {
             toggle("クリップボード履歴を保存",Prefs.clipboardHistory,s.clipboardHistory)
-            text("画像・GIF・動画は貼り付け操作でのみ読み込みます。履歴ON時は貼り付けたメディアを最大10分表示します。")
+            text("コピーしたメディアはキーボードの表示中にプレビューします。履歴をONにすると、対応メディアも端末内の一時領域に保存します。")
             slider("履歴の最大件数",Prefs.clipboardLimit,s.clipboardLimit,5,100)
+            slider("メディアの保存期間（分）",Prefs.clipboardMediaMinutes,s.clipboardMediaMinutes,5,60)
             text("初期状態はOFFです。ONにすると、DualKeyの通常入力中に取得できた文字列を端末内だけに保存します。履歴は読込・表示時に24時間以内へ整理します。OFFにすると保存済み履歴も削除します。")
             text("機密フラグ付きのコピー、パスワード・学習禁止欄、メール・URL・長い数字列などは履歴へ保存しません。機密と通知されない文章を完全に判別することはできないため、秘密の文章を扱うときはOFFにしてください。通常の貼り付けは履歴OFFでも使えます。")
             button("クリップボード履歴を全削除") {

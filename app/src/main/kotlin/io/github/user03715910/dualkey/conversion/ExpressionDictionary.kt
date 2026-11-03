@@ -13,6 +13,7 @@ class ExpressionDictionary(context: Context,scope: CoroutineScope) {
     val entries=snapshot.asStateFlow()
     init { scope.launch(Dispatchers.IO) {
         try {
+            val words=linkedMapOf<String,List<String>>()
             val symbols=linkedMapOf<String,List<String>>()
             val ja=linkedMapOf<String,List<String>>()
             val en=linkedMapOf<String,List<String>>()
@@ -23,6 +24,7 @@ class ExpressionDictionary(context: Context,scope: CoroutineScope) {
                     if (fields.size==4) {
                         val map=when (fields[0]) {
                             "symbol" -> symbols
+                            "word" -> words
                             "face" -> faces
                             else -> if (fields[1]=="en") en else ja
                         }
@@ -38,7 +40,7 @@ class ExpressionDictionary(context: Context,scope: CoroutineScope) {
                 }
             }
             load("ja",ja); load("en",en)
-            snapshot.value=ExpressionCandidates(symbols,ExpressionIndex(ja),ExpressionIndex(en),ExpressionIndex(faces))
+            snapshot.value=ExpressionCandidates(symbols,ExpressionIndex(ja),ExpressionIndex(en),ExpressionIndex(faces),words)
         } catch (e: CancellationException) { throw e } catch (_: Exception) { /* Optional dictionary. */ }
     } }
 }

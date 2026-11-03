@@ -164,6 +164,38 @@ class DeviceInputTest {
         touch(rect("ABC")); touch(rect("DEF")); clickLabel("Shift：大文字固定"); touch(rect("abc"))
         assertEquals("@.?AaaADa",inputText())
     }
+    @Test fun candidateTabsFilterAndCommitWithoutSpaces() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { withTimeout(10_000) { app.expressions.entries.first { it.words.isNotEmpty() } } }
+        fun open() {
+            letters("NIKO")
+            clickLabel("一覧")
+            assertTrue(rect("すべて").right<=rect("絞り込み").left)
+            assertTrue(rect("絞り込み").right<=rect("絵文字").left)
+            assertTrue(rect("絵文字").right<=rect("顔文字").left)
+        }
+        fun pick(value: String) {
+            val node=gridCandidate { it.substringAfter('：')==value } ?: error("Missing candidate: $value")
+            assertTrue(node.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+            instrumentation.waitForIdleSync()
+        }
+        open()
+        clickLabel("絞り込み")
+        assertEquals("にこ",inputText())
+        assertNotNull(gridCandidate { it.substringAfter('：')=="二個" })
+        assertNull(findNode { it.contentDescription?.toString()?.substringAfter('：') in setOf("にコメント","に来","にこれ","にこの") })
+        pick("2個")
+        open()
+        clickLabel("絵文字")
+        assertNotNull(gridCandidate { it.substringAfter('：')=="😊" })
+        assertNull(findNode { it.contentDescription?.toString()?.endsWith("：二個")==true })
+        clickLabel("絞り込み")
+        pick("2個")
+        open()
+        clickLabel("顔文字")
+        pick("(^_^)")
+        assertEquals("2個2個(^_^)",inputText())
+    }
     @Test fun japanesePunctuationAliasesAndExpressionsAreSelectable() {
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
         runBlocking { withTimeout(10_000) { app.expressions.entries.first { it.symbols.isNotEmpty() } }

@@ -24,7 +24,8 @@ object SemanticConversion {
         if (additions.isEmpty()) return base.take(maximum)
         val extraSet=additions.toSet()
         val leading=base.filterNot { it.text in extraSet }.take(maximum-additions.size)
-        return leading + additions.map { Candidate(it,reading) }
+        return leading + additions.map { value -> base.firstOrNull { it.text==value }
+            ?: Candidate(value,reading,if (value==katakana(reading)) CandidateKind.WORD else CandidateKind.RELATED) }
     }
 }
 

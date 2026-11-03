@@ -25,15 +25,15 @@ class CandidateGrid @JvmOverloads constructor(context: Context,attrs: android.ut
     private val cells=object: Adapter<Cell>() {
         override fun getItemCount()=values.size+1
         override fun onCreateViewHolder(parent: ViewGroup,type: Int)=Cell(TextView(context).apply {
-            isFocusable=false; textSize=16f; minHeight=dp(38); maxLines=2
-            ellipsize=android.text.TextUtils.TruncateAt.END; includeFontPadding=false
+            isFocusable=false; textSize=16f; minHeight=dp(38)
+            includeFontPadding=false
             gravity=Gravity.CENTER_VERTICAL; setPadding(dp(6),dp(4),dp(6),dp(4))
             layoutParams=LayoutParams(-1,-2).apply { setMargins(dp(1),dp(1),dp(1),dp(1)) }
         })
         override fun onBindViewHolder(holder: Cell,position: Int) {
             val v=holder.label
             if (position==values.size) {
-                v.text=if (loading) "${values.size}件・検索中…" else "${values.size}件"
+                v.text=if (loading) "${values.size}件・検索中…" else if (values.isEmpty()) "該当する候補はありません" else "${values.size}件"
                 v.contentDescription=v.text; v.setTextColor(ink); v.setBackgroundColor(backgroundColor)
                 v.setOnClickListener(null); v.isClickable=false
             } else {

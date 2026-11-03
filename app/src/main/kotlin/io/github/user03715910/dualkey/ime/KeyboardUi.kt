@@ -14,6 +14,8 @@ import android.widget.*
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import io.github.dualkey.core.DisplayMode
+import io.github.dualkey.core.Candidate
+import io.github.dualkey.core.CandidateKind
 import io.github.user03715910.dualkey.R
 import io.github.user03715910.dualkey.data.Settings
 
@@ -26,6 +28,18 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     private val compositionAttribution = root.findViewById<ImageView>(R.id.composition_attribution)
     private var googleText: String? = null
     private val expandedScroll = root.findViewById<CandidateGrid>(R.id.candidate_expanded_scroll)
+    private enum class CandidateMode(val label: String) {
+        ALL("すべて"), EXACT("絞り込み"), EMOJI("絵文字"), FACE("顔文字")
+    }
+    private var candidateMode=CandidateMode.ALL
+    private val candidateTabs=LinearLayout(context).apply {
+        layoutParams=LinearLayout.LayoutParams(-1,dp(38))
+        visibility=View.GONE
+    }.also { root.addView(it,root.indexOfChild(expandedScroll)+1) }
+    private val clipboardPreview=LinearLayout(context).apply {
+        layoutParams=LinearLayout.LayoutParams(-1,dp(40))
+        visibility=View.GONE
+    }.also { root.addView(it,root.indexOfChild(toolbar)+1) }
     private var candidateExpanded = false
     private var previousCandidates=emptyList<String>()
     private var dictionaryNotice = ""
@@ -47,6 +61,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         numberRow.visibility=if (showNumbers && !translating && !candidateExpanded) View.VISIBLE else View.GONE
         keys.visibility=if (showKeys && !translating && !candidateExpanded) View.VISIBLE else View.GONE
         expandedScroll.visibility=if (candidateExpanded && !translating) View.VISIBLE else View.GONE
+        candidateTabs.visibility=expandedScroll.visibility
         candidateExpand.text=if (candidateExpanded) "閉じる" else "一覧"
         candidateExpand.contentDescription=if (candidateExpanded) "変換候補の一覧を閉じる" else "変換候補を一覧表示"
         if (googleText!=null) {
@@ -215,19 +230,23 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             })
         }
     }
-    fun candidates(values: List<String>, selected: Int, select: (Int) -> Unit, canLoadMore: Boolean=false, loading: Boolean=false) {
+    fun candidates(values: List<String>, selected: Int, select: (Int) -> Unit, canLoadMore: Boolean=false, loading: Boolean=false, records: List<Candidate> = emptyList(), reading: String = "") {
         val changed=values.take(3)!=previousCandidates.take(3)
         previousCandidates=values
         candidateStrip.removeAllViews()
-        candidateExpand.visibility=if (values.isEmpty()) View.GONE else View.VISIBLE
+        candidateExpand.visibility=if (values.isEmpty() && !candidateExpanded) View.GONE else View.VISIBLE
         if (values.isEmpty()) {
-            candidateExpanded=false
+            if (!loading) candidateExpanded=false
             expandedScroll.submit(emptyList(),-1,ink,keyColor,{},false,false,{})
         }
         candidateExpand.setOnClickListener {
             feedback(candidateExpand); candidateExpanded=!candidateExpanded
             expandedScroll.layoutParams.height=dp(if (context.resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) 128 else 200)
-            if (candidateExpanded) populateExpanded(values,selected,select,canLoadMore,loading)
+            if (candidateExpanded) {
+                candidateMode=CandidateMode.ALL
+                populateExpanded(values,selected,select,canLoadMore,loading,records,reading)
+                expandedScroll.scrollToPosition(0)
+            }
             updateBody()
             if (candidateExpanded) callback("expand_candidates")
         }
@@ -239,13 +258,41 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         }) }
         if (values.isEmpty()) renderEmptyCandidates()
         if (candidateExpanded) {
-            populateExpanded(values,selected,select,canLoadMore,loading)
+            populateExpanded(values,selected,select,canLoadMore,loading,records,reading)
             if (changed) expandedScroll.scrollToPosition(0)
         }
         updateBody()
     }
-    private fun populateExpanded(values: List<String>,selected: Int,select: (Int)->Unit,canLoadMore: Boolean,loading: Boolean) {
-        expandedScroll.submit(values,selected,ink,keyColor,{ index -> candidateExpanded=false; updateBody(); select(index) },canLoadMore,loading) { callback("more_candidates") }
+    private fun populateExpanded(values: List<String>,selected: Int,select: (Int)->Unit,canLoadMore: Boolean,
+        loading: Boolean,records: List<Candidate>,reading: String) {
+        val indices=if (candidateMode==CandidateMode.ALL) values.indices.toList() else records.indices.filter { index ->
+            val record=records[index]
+            when (candidateMode) {
+                CandidateMode.ALL -> true
+                CandidateMode.EXACT -> reading.isNotEmpty() && record.directlyMatches(reading)
+                CandidateMode.EMOJI -> record.kind==CandidateKind.EMOJI
+                CandidateMode.FACE -> record.kind==CandidateKind.FACE
+            }
+        }
+        expandedScroll.submit(indices.map(values::get),indices.indexOf(selected),ink,keyColor,{ index ->
+            candidateExpanded=false
+            updateBody()
+            select(indices[index])
+        },canLoadMore,loading) { callback("more_candidates") }
+        candidateTabs.removeAllViews()
+        for (mode in CandidateMode.entries) {
+            candidateTabs.addView(button(mode.label,"noop",small=true).apply {
+                layoutParams=LinearLayout.LayoutParams(0,-1,1f)
+                isSelected=mode==candidateMode
+                setTextColor(if (isSelected) Color.WHITE else ink)
+                setBackgroundColor(if (isSelected) Color.rgb(8,127,140) else functionColor)
+                setOnClickListener {
+                    candidateMode=mode
+                    populateExpanded(values,selected,select,canLoadMore,loading,records,reading)
+                    expandedScroll.scrollToPosition(0)
+                }
+            })
+        }
     }
     fun dictionaryStatus(message: String) {
         dictionaryNotice=if (message=="日本語辞書の準備完了") "" else message
@@ -277,22 +324,45 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         } })
     }
     fun hideTranslation() { translationPanel.visibility=View.GONE; translationPanel.removeAllViews(); updateBody() }
+    fun showClipboardPreview(bitmap: android.graphics.Bitmap?,label: String?,paste: ()->Unit = {},dismiss: ()->Unit = {}) {
+        clipboardPreview.removeAllViews()
+        clipboardPreview.visibility=if (label==null) View.GONE else View.VISIBLE
+        if (label==null) return
+        if (bitmap!=null) clipboardPreview.addView(ImageView(context).apply {
+            layoutParams=LinearLayout.LayoutParams(dp(44),-1)
+            scaleType=ImageView.ScaleType.FIT_CENTER
+            setImageBitmap(bitmap)
+            contentDescription="コピーしたメディアのプレビュー"
+            setOnClickListener { paste() }
+        })
+        clipboardPreview.addView(button(label,"noop",small=true).apply {
+            layoutParams=LinearLayout.LayoutParams(0,-1,1f)
+            setOnClickListener { paste() }
+        })
+        clipboardPreview.addView(button("×","noop",small=true).apply {
+            layoutParams=LinearLayout.LayoutParams(dp(44),-1)
+            contentDescription="コピープレビューを閉じる"
+            setOnClickListener { dismiss() }
+        })
+    }
     fun showClipboard(entries: List<io.github.user03715910.dualkey.data.ClipboardEntry>,enabled: Boolean,
         paste: (io.github.user03715910.dualkey.data.ClipboardEntry)->Unit,remove: (io.github.user03715910.dualkey.data.ClipboardEntry)->Unit,clear: ()->Unit,close: ()->Unit,
-        media: List<io.github.user03715910.dualkey.data.MediaHistoryEntry>,
+        media: List<io.github.user03715910.dualkey.data.MediaHistoryEntry>, limit: Int,
         pasteMedia: (io.github.user03715910.dualkey.data.MediaHistoryEntry)->Unit,
         removeMedia: (io.github.user03715910.dualkey.data.MediaHistoryEntry)->Unit) {
         translationPanel.removeAllViews(); translationPanel.visibility=View.VISIBLE; candidateExpanded=false; updateBody()
         translationPanel.addView(TextView(context).apply {
-            text=if (!enabled) "履歴保存はOFFです。設定の「入力とサイズ」で有効にできます。" else if (entries.isEmpty() && media.isEmpty()) "保存した履歴はありません（文字は24時間以内）" else "クリップボード履歴・文字24時間／メディア10分"
+            text=if (!enabled) "履歴保存はOFFです。設定の「入力とサイズ」で有効にできます。" else if (entries.isEmpty() && media.isEmpty()) "保存した履歴はありません（文字は24時間以内）" else "クリップボード履歴・新しい順"
             textSize=13f; setTextColor(ink); setPadding(dp(8),dp(4),dp(8),dp(4))
         })
+        val ordered=(entries.mapIndexed { index,entry -> index to entry.time } +
+            media.mapIndexed { index,entry -> entries.size+index to entry.copiedAt }).sortedByDescending { it.second }.take(limit)
         val list=androidx.recyclerview.widget.RecyclerView(context).apply {
             layoutParams=LinearLayout.LayoutParams(-1,dp(128)); isFocusable=false
             layoutManager=androidx.recyclerview.widget.LinearLayoutManager(context); itemAnimator=null
         }
         list.adapter=object: androidx.recyclerview.widget.RecyclerView.Adapter<ClipboardCell>() {
-            override fun getItemCount()=entries.size+media.size
+            override fun getItemCount()=ordered.size
             override fun onCreateViewHolder(parent: ViewGroup,type: Int): ClipboardCell {
                 val row=LinearLayout(context).apply { isBaselineAligned=false; layoutParams=androidx.recyclerview.widget.RecyclerView.LayoutParams(-1,-2) }
                 val label=TextView(context).apply { textSize=16f; setTextColor(ink); minHeight=dp(44); maxLines=2; ellipsize=android.text.TextUtils.TruncateAt.END; setPadding(dp(8),dp(4),dp(8),dp(4)); isFocusable=false }
@@ -302,7 +372,8 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
                 row.addView(label,LinearLayout.LayoutParams(0,-2,1f)); row.addView(delete,LinearLayout.LayoutParams(dp(56),dp(44)))
                 return ClipboardCell(row,label,delete,preview)
             }
-            override fun onBindViewHolder(holder: ClipboardCell,position: Int) {
+            override fun onBindViewHolder(holder: ClipboardCell,adapterPosition: Int) {
+                val position=ordered[adapterPosition].first
                 if (position<entries.size) {
                     val entry=entries[position]; holder.label.text=entry.text; holder.label.contentDescription="履歴 ${position+1}：${entry.text}"
                     holder.preview.setImageDrawable(null); holder.preview.visibility=View.GONE; holder.preview.setOnClickListener(null)

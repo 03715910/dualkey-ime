@@ -12,8 +12,8 @@ class DictionaryConversionEngine(
     private val known=object: LinkedHashMap<String,Set<String>>(64,0.75f,true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String,Set<String>>?)=size>64
     }
-    private data class Path(val text: String, val right: Int, val cost: Int, val unknown: Boolean = false,val lastWord: String="")
-    private data class Result(val text: String, val cost: Int, val reading: String)
+    private data class Path(val text: String, val right: Int, val cost: Int, val unknown: Boolean = false,val lastWord: String="", val segmented: Boolean=false)
+    private data class Result(val text: String, val cost: Int, val reading: String, val kind: CandidateKind = CandidateKind.WORD)
 
     private fun best(paths: List<Path>, limit: Int): List<Path> {
         val seen = HashSet<Pair<String, Int>>()
@@ -63,7 +63,7 @@ class DictionaryConversionEngine(
                     states[finish].add(Path(parent.text + word.text, word.right,
                         parent.cost + lexicon.transition(parent.right, word.left) + word.cost -
                             (if (unknown) 0 else bonus(frequencies[input.substring(start,finish) to word.text])+bonus(adjacent[parent.lastWord to word.text])),
-                        parent.unknown || unknown,word.text))
+                        parent.unknown || unknown,word.text,start>0))
                 }
                 if (states[finish].size > 1800) {
                     val compact = best(states[finish], beam * 2)
@@ -72,7 +72,7 @@ class DictionaryConversionEngine(
             }
         }
         val converted = best(states[input.length], beam * 2)
-            .map { Result(it.text, it.cost + lexicon.transition(it.right, 0), input) }
+            .map { Result(it.text, it.cost + lexicon.transition(it.right, 0), input, if (it.unknown || it.segmented && input.length<=2) CandidateKind.RELATED else CandidateKind.WORD) }
         val result = ArrayList<Result>(); result.addAll(converted)
         // Direct entries keep rare single kanji reachable even outside the beam.
         lexicon.exact(input,10000).forEach { word -> result.add(Result(word.text,
@@ -101,7 +101,13 @@ class DictionaryConversionEngine(
                 }
             }
         }
-        val ranked = result.sortedBy { it.cost }.map { Candidate(it.text,it.reading) }
+        val ordered = result.sortedBy { it.cost }
+        val direct = ordered.filter { it.reading==input && it.kind==CandidateKind.WORD }
+        val exactByText = direct.associateBy { it.text }
+        val ranked = ((if (prediction) direct.distinctBy { it.text }.take(8) else emptyList())+ordered).map {
+            val match=exactByText[it.text] ?: it
+            Candidate(match.text,match.reading,match.kind)
+        }
         val preferred = dictionary[input].orEmpty().map { Candidate(it,input) }
         return ((preferred+ranked).distinctBy { it.text }.filter { it.text!=input && it.text!=katakana(input) }
             .take(maxOf(1,count-2)) + listOf(Candidate(input,input),Candidate(katakana(input),input)))

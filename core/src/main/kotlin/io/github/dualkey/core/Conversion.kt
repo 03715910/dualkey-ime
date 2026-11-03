@@ -1,6 +1,12 @@
 package io.github.dualkey.core
 
-data class Candidate(val text: String, val reading: String)
+enum class CandidateKind { WORD, SYMBOL, EMOJI, FACE, RELATED }
+
+data class Candidate(val text: String, val reading: String, val kind: CandidateKind = CandidateKind.WORD) {
+    fun directlyMatches(input: String): Boolean =
+        (kind==CandidateKind.WORD || kind==CandidateKind.SYMBOL) &&
+            Personalization.normalize(reading).lowercase() == Personalization.normalize(input).lowercase()
+}
 interface ConversionEngine {
     fun candidates(reading: String, prediction: Boolean, limit: Int): List<Candidate>
 }
@@ -38,8 +44,7 @@ class LocalConversionEngine(private val user: () -> Map<String, List<String>> = 
     override fun candidates(reading: String, prediction: Boolean, limit: Int): List<Candidate> {
         if (reading.isEmpty()) return emptyList()
         val dict = words + user()
-        val results = mutableListOf<String>()
-        results += dict[reading].orEmpty()
+        val results = dict[reading].orEmpty().map { Candidate(it,reading) }.toMutableList()
         val sentence = buildString {
             var i = 0
             val keys = dict.keys.sortedByDescending { it.length }
@@ -49,11 +54,13 @@ class LocalConversionEngine(private val user: () -> Map<String, List<String>> = 
                 else { append(reading[i]); i++ }
             }
         }
-        results += sentence
-        if (prediction) dict.filterKeys { it.startsWith(reading) && it != reading }.values.forEach { results += it }
-        results += reading
-        results += reading.map { if (it in 'ぁ'..'ゖ') it + 0x60 else it }.joinToString("")
-        return results.distinct().take(limit.coerceIn(2,10000)).map { Candidate(it, reading) }
+        if (sentence!=reading && reading.length>2) results += Candidate(sentence,reading)
+        if (prediction) dict.filterKeys { it.startsWith(reading) && it!=reading }.forEach { (key,values) ->
+            results += values.map { Candidate(it,key) }
+        }
+        results += Candidate(reading,reading)
+        results += Candidate(SemanticConversion.katakana(reading),reading)
+        return results.distinctBy { it.text }.take(limit.coerceIn(2,10000))
     }
 }
 

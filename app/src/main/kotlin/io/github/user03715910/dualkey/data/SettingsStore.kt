@@ -51,6 +51,7 @@ object Prefs {
     val screenEnter = stringPreferencesKey("screen_enter_behavior")
     val physicalEnter = stringPreferencesKey("physical_enter_behavior")
     val clipboardHistory = booleanPreferencesKey("clipboard_history_enabled")
+    val clipboardMediaMinutes = intPreferencesKey("clipboard_media_minutes")
     val clipboardLimit = intPreferencesKey("clipboard_history_limit")
 }
 
@@ -61,6 +62,7 @@ data class Settings(val p: Preferences = emptyPreferences()) {
     val screenEnter get() = p[Prefs.screenEnter] ?: "SMART_NEWLINE"
     val physicalEnter get() = p[Prefs.physicalEnter] ?: "SMART_SEND"
     val clipboardHistory get() = p[Prefs.clipboardHistory] ?: false
+    val clipboardMediaMinutes get() = (p[Prefs.clipboardMediaMinutes] ?: 10).coerceIn(5,60)
     val clipboardLimit get() = (p[Prefs.clipboardLimit] ?: 20).coerceIn(5,100)
     val numberRow get() = p[Prefs.numberRow] ?: true
     val flickDp get() = (p[Prefs.flickDp] ?: 24).coerceIn(8,64)

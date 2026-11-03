@@ -19,9 +19,9 @@ symbol	ja	ちょさくけん|しょうひょう|まるしー	©|®|™|℗
 symbol	ja	ゆうびん|でんわ|ふぁっくす	〒|☎|℡|℻
 symbol	ja	だっしゅ|はいふん|ぼう|よこぼう	‐|‑|–|—|―|−|ー
 symbol	ja	こめ|こめじるし|あすてりすく	※|＊|*|⁂
-emoji	ja	えがお|わらう|にっこり|うれしい	😊|😄|🙂|😁|☺️
-emoji	ja	ありがとう|かんしゃ|おれい	🙏|😊|🙇|💐
-emoji	ja	はーと|すき|だいすき|あい	❤️|💕|💖|💗|💝
+emoji	ja	えがお|わらう|にっこり|にこ|にこにこ|うれしい	😊|😄|😁|☺️|😆|🙂
+emoji	ja	ありがとう|かんしゃ|おれい	🙏|😊|🥰|🙇|💐
+emoji	ja	はーと|すき|だいすき|あい	❤️|💕|💖|💗|💓|💝
 emoji	ja	ねこ|にゃんこ|にゃー	🐱|🐈|😺|🐈‍⬛
 emoji	ja	ないた|なく|なみだ|かなしい	😢|😭|🥲|😿
 emoji	ja	おめでとう|いわい|たんじょうび	🎉|🎊|🎂|🥳|🎁
@@ -29,19 +29,19 @@ emoji	ja	おはよう|あさ	☀️|🌅|🐣
 emoji	ja	おやすみ|ねる|ねむい	😴|🌙|💤
 emoji	ja	ごめん|すみません|おねがい	🙏|🙇|🥺
 emoji	ja	いいね|りょうかい|おっけー	👍|👌|🆗
-emoji	en	thanks|thank you|thank|grateful	🙏|😊|🙇|💐
+emoji	en	thanks|thank you|thank|grateful	🙏|😊|🥰|🙇|💐
 emoji	en	cried|cry|sad|tears	😢|😭|🥲|😿
 emoji	en	heart|love	❤️|💕|💖|💗
 emoji	en	smile|happy|smiling	😊|😄|🙂|😁
-face	ja	えがお|わらう|にっこり|うれしい|smile|happy	(^_^)|(≧▽≦)|(＾▽＾)|(´▽｀)|(✿◠‿◠)
-face	ja	ありがとう|かんしゃ|おれい|thanks|thank you	(人´∀｀)|(人•ᴗ•♡)|(*ᴗˬᴗ)⁾⁾
+face	ja	えがお|わらう|にっこり|にこ|にこにこ|うれしい|smile|happy	(^_^)|(≧▽≦)|(^o^)|(＾ω＾)|(＾▽＾)|(´▽｀)|(✿◠‿◠)
+face	ja	ありがとう|かんしゃ|おれい|thanks|thank you	(人´∀｀)|m(_ _)m|(´▽｀)|(人•ᴗ•♡)|(*ᴗˬᴗ)⁾⁾
 face	ja	はーと|だいすき|すき|heart|love	(♡˙︶˙♡)|(｡♥‿♥｡)|( ˘ ³˘)♥
 face	ja	ねこ|にゃんこ|cat|kitty	(=^・^=)|ฅ^•ﻌ•^ฅ|(=｀ω´=)
-face	ja	ないた|なく|なみだ|かなしい|cry|sad	(T_T)|(；ω；)|(つ﹏⊂)|(╥﹏╥)
+face	ja	ないた|なく|なみだ|かなしい|cry|sad	(T_T)|(；；)|(´；ω；｀)|(；ω；)|(つ﹏⊂)|(╥﹏╥)
 face	ja	おどろき|びっくり|surprise|wow	(ﾟдﾟ)|(°ロ°) !|Σ(・ω・ノ)ノ
 face	ja	こまる|しょんぼり|worried	(´・ω・｀)|(・・;)|(；´Д｀)
 face	ja	ねむい|おやすみ|sleep|sleepy	(-_-)zzz|(－ω－) zzZ|( ˘ω˘ )
-face	ja	おこる|いかり|angry	(｀Д´)|(＃｀皿´)|(ง •̀_•́)ง
+face	ja	おこ|おこる|いかり|angry	(｀Д´)|(｀・ω・´)|(＃｀皿´)|(ง •̀_•́)ง
 face	ja	おめでとう|やった|congrats|party	ヽ(・∀・)ﾉ|＼(^o^)／|٩(ˊᗜˋ*)و
 face	ja	おねがい|ごめん|すみません|please|sorry	(m_ _)m|(＞人＜；)|(｡>﹏<｡)
 face	ja	さようなら|ばいばい|bye	( ´ ▽ ` )ﾉ|(｡･ω･)ﾉﾞ|ヾ(＾∇＾)
@@ -51,3 +51,15 @@ face	ja	かんがえる|なやむ|think|thinking	(。-ω-)|(´-ω-｀)|(。ヘ°
 face	ja	むひょうじょう|まがお|neutral	(・_・)|(-_-)|(￣ー￣)
 face	ja	わからない|しらない|shrug	¯\\_(ツ)_/¯|╮(￣_￣)╭
 face	ja	たべる|おいしい|eat|yummy	(๑´ڡ`๑)|(っ˘ڡ˘ς)
+
+# Counter spellings and width variants.
+word	ja	いっこ	1個|１個|一個
+word	ja	にこ	2個|２個|二個
+word	ja	さんこ	3個|３個|三個
+word	ja	よんこ	4個|４個|四個
+word	ja	ごこ	5個|５個|五個
+word	ja	ろっこ	6個|６個|六個
+word	ja	ななこ	7個|７個|七個
+word	ja	はっこ	8個|８個|八個
+word	ja	きゅうこ	9個|９個|九個
+word	ja	じゅっこ	10個|１０個|十個

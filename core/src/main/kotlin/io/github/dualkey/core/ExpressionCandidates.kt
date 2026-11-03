@@ -22,10 +22,11 @@ class ExpressionCandidates(
     private val ja: ExpressionIndex = ExpressionIndex(),
     private val en: ExpressionIndex = ExpressionIndex(),
     private val faces: ExpressionIndex = ExpressionIndex(),
+    val words: Map<String,List<String>> = emptyMap(),
 ) {
-    fun find(reading: String, english: Boolean, prefix: Boolean, emoji: Boolean, face: Boolean): List<Candidate> {
-        val pictures=if (emoji) (if (english) en else ja).find(reading,prefix,if (prefix) 6 else 20) else emptyList()
-        val kaomoji=if (face) faces.find(reading,prefix,if (prefix) 3 else 12) else emptyList()
+    fun find(reading: String, english: Boolean, prefix: Boolean, emoji: Boolean, face: Boolean, expanded: Boolean = false): List<Candidate> {
+        val pictures=if (emoji) (if (english) en else ja).find(reading,prefix,if (expanded) 10000 else if (prefix) 6 else 20).map { it.copy(kind=CandidateKind.EMOJI) } else emptyList()
+        val kaomoji=if (face) faces.find(reading,prefix,if (expanded) 10000 else if (prefix) 3 else 12).map { it.copy(kind=CandidateKind.FACE) } else emptyList()
         return (pictures.take(3)+kaomoji.take(3)+pictures.drop(3)+kaomoji.drop(3)).distinctBy { it.text.replace("\uFE0F","") }
     }
 }

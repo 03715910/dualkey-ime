@@ -120,6 +120,20 @@ class ImeVisibilityDeviceTest {
         await("keyboard action $label") { automation.windows.filter { it.type==android.view.accessibility.AccessibilityWindowInfo.TYPE_INPUT_METHOD }
             .firstNotNullOfOrNull { find(it.root) }?.performAction(action)==true }
     }
+    @Test fun copiedImagePreviewAndUnpastedMediaHistoryCanSendSequentially() {
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        try {
+            launch("images"); await("image editor window focused") { fixtureState().contains("windowFocus=true") }; edit()
+            click("copy-test.png")
+            keyboardAction("コピーしたメディアのプレビュー")
+            await("PNG received from preview") { mediaResult().contains("image/png; match=true") }
+            click("copy-test.jpeg")
+            keyboardAction("コピープレビューを閉じる")
+            keyboardAction("貼り付け",AccessibilityNodeInfo.ACTION_LONG_CLICK)
+            keyboardAction("画像 · JPEG")
+            await("unpasted JPEG received from history") { mediaResult().contains("image/jpeg; match=true") }
+        } finally { runBlocking { app.settings.set(Prefs.clipboardHistory,false) } }
+    }
     @Test fun richEditorReceivesImagesGifAndVideoWithActualReadGrant() {
         launch("rich"); await("rich editor window focused") { fixtureState().contains("windowFocus=true") }; edit()
         listOf("test.png" to "image/png","test.jpeg" to "image/jpeg","test.webp" to "image/webp",
