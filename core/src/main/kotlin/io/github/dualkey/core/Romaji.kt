@@ -22,6 +22,16 @@ object Romaji {
         mapOf("a" to "ぁ", "i" to "ぃ", "u" to "ぅ", "e" to "ぇ", "o" to "ぉ", "ya" to "ゃ", "yu" to "ゅ", "yo" to "ょ", "tu" to "っ", "tsu" to "っ", "wa" to "ゎ", "ka" to "ゕ", "ke" to "ゖ").forEach { (k,v) -> put("x$k",v); put("l$k",v) }
     }
     private val prefixes = table.keys.flatMap { k -> (1 until k.length).map { k.take(it) } }.toSet()
+    private const val sokuonInitials = "bcdfghjkmprstvyz"
+
+    private fun syllableAt(text: String, start: Int): String? {
+        for (length in minOf(4, text.length - start) downTo 1) {
+            val key = text.substring(start, start + length)
+            if (key in table) return key
+        }
+        return null
+    }
+
     fun convert(raw: String, flush: Boolean = false): String = buildString {
         val s = raw.lowercase()
         var i = 0
@@ -32,13 +42,27 @@ object Romaji {
                 append(if (c in '!'..'~' && !c.isLetterOrDigit()) c + 0xfee0 else c)
                 i++; continue
             }
-            if (i+1 < s.length && c == s[i+1] && c in "bcdfghjklmpqrstvwxyz") { append('っ'); i++; continue }
-            if (c == 'n') {
-                if (i+2 == s.length && s[i+1] == 'n') { append('ん'); i+=2; continue }
-                if (i+1 == s.length) { append(if (flush) 'ん' else 'n'); i++; continue }
-                if (s[i+1] !in "aiueoy'") { append('ん'); i++; continue }
+            val next = s.getOrNull(i + 1)
+            if (c == next && c in sokuonInitials && syllableAt(s, i + 1) != null) {
+                append('っ'); i++; continue
             }
-            val match = (minOf(4,s.length-i) downTo 1).map { s.substring(i,i+it) }.firstOrNull { it in table }
+            if (c == 'n') {
+                if (next == 'n') {
+                    append('ん')
+                    // The second n is available for na/nya, but has already
+                    // contributed to the displayed ん before a different consonant.
+                    val afterPair = s.getOrNull(i + 2)
+                    i += when {
+                        afterPair == '\'' -> 3
+                        afterPair != null && (syllableAt(s, i + 1) != null || s.substring(i + 1) in prefixes) -> 1
+                        else -> 2
+                    }
+                    continue
+                }
+                if (next == null) { append(if (flush) 'ん' else 'n'); i++; continue }
+                if (next !in "aiueoy'") { append('ん'); i++; continue }
+            }
+            val match = syllableAt(s, i)
             if (match != null) { append(table.getValue(match)); i += match.length }
             else if (!flush && s.substring(i) in prefixes) { append(s.substring(i)); break }
             else { append(c); i++ }
@@ -54,9 +78,13 @@ class Composer {
     fun append(value: String) { raw.append(value) }
     fun delete(): Boolean {
         if (raw.isEmpty()) return false
-        // Once converted, delete a displayed character instead of undoing a romaji key.
-        // Unfinished suffixes (k, ky, n, ...) remain romaji and can still be completed.
         val rendered=text
+        // Undo a pending key without losing lookahead state (nnk -> nn).
+        if (rendered.last() in 'a'..'z' && rendered.last()==raw.last().lowercaseChar()) {
+            raw.setLength(raw.length-1)
+            return true
+        }
+        // Once converted, delete a displayed character instead of undoing a romaji key.
         replace(rendered.substring(0,rendered.offsetByCodePoints(rendered.length,-1)))
         return true
     }

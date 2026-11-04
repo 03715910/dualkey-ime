@@ -2,10 +2,71 @@ package io.github.dualkey.core
 
 enum class CandidateKind { WORD, SYMBOL, EMOJI, FACE, RELATED }
 
-data class Candidate(val text: String, val reading: String, val kind: CandidateKind = CandidateKind.WORD) {
+enum class CandidateReason(val direct: Boolean = false) {
+    DICTIONARY_EXACT(true), LITERAL(true), KATAKANA(true), SEGMENTED(true), WEAK_SEGMENT,
+    PREFIX, TAIL, NEXT_WORD, SYMBOL(true), EXPRESSION_EXACT, EXPRESSION_MEANING, EXPRESSION_PREFIX,
+    MEANING, USER_DICTIONARY(true), USER_PREFIX, LEARNED, COUNTER(true), PHRASE(true), PHRASE_PREFIX
+}
+
+enum class CandidateSource { JAPANESE_LEXICON, USER_DICTIONARY, INPUT, FALLBACK, PHRASE, SYMBOL_ALIAS, SYMBOL_DICTIONARY, EXPRESSION, JMDICT, HISTORY }
+
+data class CandidateEvidence(
+    val reason: CandidateReason,
+    val source: CandidateSource,
+    val reading: String,
+    val matchedLength: Int = reading.length,
+    val wordCost: Int? = null,
+    val connectionCost: Int = 0,
+    val completionCost: Int = 0,
+    val learningDiscount: Int = 0,
+    val leftPos: Int? = null,
+    val rightPos: Int? = null,
+    val choice: LearnedChoice? = null,
+    val continuation: LearnedContinuation? = null,
+    val context: String? = null,
+) {
+    val addedReadingLength get() = reading.length - matchedLength
+    val cost get() = wordCost?.let { it + connectionCost + completionCost }
+}
+
+data class Candidate(
+    val text: String,
+    val reading: String,
+    val kind: CandidateKind = CandidateKind.WORD,
+    val evidence: CandidateEvidence? = null,
+    val alternatives: List<CandidateEvidence> = emptyList(),
+) {
     fun directlyMatches(input: String): Boolean =
-        (kind==CandidateKind.WORD || kind==CandidateKind.SYMBOL) &&
-            Personalization.normalize(reading).lowercase() == Personalization.normalize(input).lowercase()
+        Personalization.normalize(input).lowercase().let { key ->
+            if (evidence == null) (kind == CandidateKind.WORD || kind == CandidateKind.SYMBOL) &&
+                Personalization.normalize(reading).lowercase() == key
+            else (evidence.reason.direct && evidence.reading == key) || alternatives.any { it.reason.direct && it.reading == key }
+        }
+
+    fun withAlternative(other: Candidate): Candidate {
+        val newEvidence = listOfNotNull(other.evidence) + other.alternatives
+        return withEvidence(newEvidence)
+    }
+
+    fun withEvidence(extra: List<CandidateEvidence>): Candidate {
+        val added = extra.filter { it != evidence && it !in alternatives }
+        return if (added.isEmpty()) this else copy(alternatives = alternatives + added)
+    }
+}
+
+/** Keep display order, preferring the full match for commitment and learning. */
+fun mergeCandidates(candidates: Iterable<Candidate>): List<Candidate> {
+    val unique = LinkedHashMap<String, Candidate>()
+    for (candidate in candidates) {
+        val previous = unique[candidate.text]
+        unique[candidate.text] = when {
+            previous == null -> candidate
+            previous.evidence?.reason?.direct != true && candidate.evidence?.reason?.direct == true ->
+                candidate.withAlternative(previous)
+            else -> previous.withAlternative(candidate)
+        }
+    }
+    return unique.values.toList()
 }
 interface ConversionEngine {
     fun candidates(reading: String, prediction: Boolean, limit: Int): List<Candidate>
@@ -43,8 +104,13 @@ class LocalConversionEngine(private val user: () -> Map<String, List<String>> = 
     )
     override fun candidates(reading: String, prediction: Boolean, limit: Int): List<Candidate> {
         if (reading.isEmpty()) return emptyList()
-        val dict = words + user()
-        val results = dict[reading].orEmpty().map { Candidate(it,reading) }.toMutableList()
+        val custom = user()
+        val dict = words + custom
+        val results = dict[reading].orEmpty().map {
+            val reason = if (reading in custom) CandidateReason.USER_DICTIONARY else CandidateReason.DICTIONARY_EXACT
+            Candidate(it, reading, evidence = CandidateEvidence(reason,
+                if (reading in custom) CandidateSource.USER_DICTIONARY else CandidateSource.FALLBACK, reading))
+        }.toMutableList()
         val sentence = buildString {
             var i = 0
             val keys = dict.keys.sortedByDescending { it.length }
@@ -54,13 +120,16 @@ class LocalConversionEngine(private val user: () -> Map<String, List<String>> = 
                 else { append(reading[i]); i++ }
             }
         }
-        if (sentence!=reading && reading.length>2) results += Candidate(sentence,reading)
+        if (sentence!=reading && reading.length>2) results += Candidate(sentence,reading,evidence =
+            CandidateEvidence(CandidateReason.SEGMENTED,CandidateSource.FALLBACK,reading))
         if (prediction) dict.filterKeys { it.startsWith(reading) && it!=reading }.forEach { (key,values) ->
-            results += values.map { Candidate(it,key) }
+            val reason = if (key in custom) CandidateReason.USER_PREFIX else CandidateReason.PREFIX
+            results += values.map { Candidate(it,key,evidence = CandidateEvidence(reason,
+                if (key in custom) CandidateSource.USER_DICTIONARY else CandidateSource.FALLBACK,key,reading.length)) }
         }
-        results += Candidate(reading,reading)
-        results += Candidate(SemanticConversion.katakana(reading),reading)
-        return results.distinctBy { it.text }.take(limit.coerceIn(2,10000))
+        val maximum = limit.coerceIn(2,10000)
+        val literals = listOf(Candidate(reading,reading),Candidate(SemanticConversion.katakana(reading),reading))
+        return mergeCandidates(mergeCandidates(results).take(maxOf(1,maximum-2)) + literals).take(maximum)
     }
 }
 

@@ -15,7 +15,7 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import io.github.dualkey.core.DisplayMode
 import io.github.dualkey.core.Candidate
-import io.github.dualkey.core.CandidateKind
+import io.github.dualkey.core.CandidateLists
 import io.github.user03715910.dualkey.R
 import io.github.user03715910.dualkey.data.Settings
 
@@ -246,7 +246,8 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             })
         }
     }
-    fun candidates(values: List<String>, selected: Int, select: (Int) -> Unit, canLoadMore: Boolean=false, loading: Boolean=false, records: List<Candidate> = emptyList(), reading: String = "") {
+    fun candidates(lists: CandidateLists, selected: Int, select: (Candidate) -> Unit, canLoadMore: Boolean=false, loading: Boolean=false, reading: String = "") {
+        val values=lists.all.map { it.text }
         val changed=values.take(3)!=previousCandidates.take(3)
         previousCandidates=values
         composingReading=reading
@@ -258,10 +259,14 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         }
         candidateExpand.setOnClickListener {
             feedback(candidateExpand); candidateExpanded=!candidateExpanded
-            expandedScroll.layoutParams.height=dp(if (context.resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) 128 else 200)
             if (candidateExpanded) {
+                val maximum=dp(if (context.resources.configuration.orientation==Configuration.ORIENTATION_LANDSCAPE) 128 else 200)
+                val keyPanel=(if (showKeys) keys.height else 0)+(if (showNumbers) numberRow.height else 0)
+                // The list and its fixed tabs share the space previously used by the keys.
+                expandedScroll.layoutParams.height=if (keyPanel>0)
+                    (keyPanel-candidateTabs.layoutParams.height).coerceIn(dp(64),maximum) else maximum
                 candidateMode=CandidateMode.ALL
-                populateExpanded(values,selected,select,canLoadMore,loading,records,reading)
+                populateExpanded(lists,selected,select,canLoadMore,loading)
                 expandedScroll.scrollToPosition(0)
             }
             updateBody()
@@ -271,31 +276,28 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             text=value; textSize=17f; setTextColor(if (selected==index) Color.WHITE else ink); includeFontPadding=false
             gravity=Gravity.CENTER_VERTICAL; setPadding(dp(10),0,dp(10),0); isFocusable=false
             setBackgroundColor(if (selected==index) Color.rgb(8,127,140) else Color.TRANSPARENT)
-            layoutParams=LinearLayout.LayoutParams(-2,-1); setOnClickListener { select(index) }
+            layoutParams=LinearLayout.LayoutParams(-2,-1); setOnClickListener { select(lists.all[index]) }
         }) }
         if (values.isEmpty()) renderEmptyCandidates()
         if (candidateExpanded) {
-            populateExpanded(values,selected,select,canLoadMore,loading,records,reading)
+            populateExpanded(lists,selected,select,canLoadMore,loading)
             if (changed) expandedScroll.scrollToPosition(0)
         }
         updateBody()
     }
-    private fun populateExpanded(values: List<String>,selected: Int,select: (Int)->Unit,canLoadMore: Boolean,
-        loading: Boolean,records: List<Candidate>,reading: String) {
-        val indices=if (candidateMode==CandidateMode.ALL) values.indices.toList() else records.indices.filter { index ->
-            val record=records[index]
-            when (candidateMode) {
-                CandidateMode.ALL -> true
-                CandidateMode.EXACT -> reading.isNotEmpty() && record.directlyMatches(reading)
-                CandidateMode.EMOJI -> record.kind==CandidateKind.EMOJI
-                CandidateMode.FACE -> record.kind==CandidateKind.FACE
-            }
+    private fun populateExpanded(lists: CandidateLists,selected: Int,select: (Candidate)->Unit,canLoadMore: Boolean,loading: Boolean) {
+        val candidates=when (candidateMode) {
+            CandidateMode.ALL -> lists.all
+            CandidateMode.EXACT -> lists.exact
+            CandidateMode.EMOJI -> lists.emoji
+            CandidateMode.FACE -> lists.face
         }
-        expandedScroll.submit(indices.map(values::get),indices.indexOf(selected),ink,keyColor,{ index ->
+        val selectedText=lists.all.getOrNull(selected)?.text
+        expandedScroll.submit(candidates.map { it.text },candidates.indexOfFirst { it.text==selectedText },ink,keyColor,{ index ->
             candidateExpanded=false
             updateBody()
-            select(indices[index])
-        },canLoadMore,loading) { callback("more_candidates") }
+            select(candidates[index])
+        },canLoadMore && candidateMode==CandidateMode.ALL,loading) { callback("more_candidates") }
         candidateTabs.removeAllViews()
         for (mode in CandidateMode.entries) {
             candidateTabs.addView(button(mode.label,"noop",small=true).apply {
@@ -305,7 +307,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
                 setBackgroundColor(if (isSelected) Color.rgb(8,127,140) else functionColor)
                 setOnClickListener {
                     candidateMode=mode
-                    populateExpanded(values,selected,select,canLoadMore,loading,records,reading)
+                    populateExpanded(lists,selected,select,canLoadMore,loading)
                     expandedScroll.scrollToPosition(0)
                 }
             })

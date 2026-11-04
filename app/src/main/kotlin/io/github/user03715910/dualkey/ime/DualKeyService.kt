@@ -79,6 +79,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var numeric = false
     private var candidates = emptyList<String>()
     private var candidateRecords = emptyList<Candidate>()
+    private var candidateLists = CandidateLists()
     private var selected = -1
     private var converting = false
     private var englishWord = ""
@@ -177,7 +178,10 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         captureClipboard()
         refreshClipboardPreview()
         refreshScreenshot()
-        window?.window?.decorView?.post { updateCaptionVisibility() }
+        window?.window?.decorView?.post {
+            updateCaptionVisibility()
+            if (windowShown && hardwareCandidates) showHardwareCandidates()
+        }
     }
     override fun onWindowHidden() {
         val wasShown=windowShown
@@ -202,13 +206,30 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     override fun onComputeInsets(outInsets: InputMethodService.Insets) {
         super.onComputeInsets(outInsets)
+        val decor=window?.window?.decorView
         if (!hasEditor() || visibility.mode==DisplayMode.HIDDEN || (candidateHostRequested && !editorRequested)) {
             // The empty candidates host keeps the IME's subwindow available without reserving keyboard space.
-            val height=window?.window?.decorView?.height ?: 0
+            val height=decor?.height ?: 0
             outInsets.contentTopInsets=height; outInsets.visibleTopInsets=height
             outInsets.touchableInsets=InputMethodService.Insets.TOUCHABLE_INSETS_REGION
             outInsets.touchableRegion.setEmpty()
+        } else if (decor!=null) {
+            visibleKeyboard()?.takeUnless { it.isLayoutRequested }?.let { keys ->
+                val top=IntArray(2).also(keys::getLocationInWindow)[1].coerceIn(0,decor.height)
+                outInsets.contentTopInsets=top; outInsets.visibleTopInsets=top
+            }
         }
+        // The window can be resized or its navigation insets changed without a new key event.
+        if (decor!=null && hardwareCandidates) {
+            decor.removeCallbacks(repositionHardwarePanel)
+            decor.postOnAnimation(repositionHardwarePanel)
+        }
+    }
+    private val repositionHardwarePanel=Runnable {
+        if (windowShown && hardwareCandidates) showHardwareCandidates()
+    }
+    private fun visibleKeyboard()=ui?.root?.takeIf {
+        visibility.mode!=DisplayMode.HIDDEN && isInputViewShown && it.isShown && it.height>0
     }
     override fun onFinishInputView(finishingInput: Boolean) {
         stopScreenshot()
@@ -263,6 +284,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
         stopScreenshot()
+        hardwarePanel.clearCursor()
         val key=EditorKey(attribute.packageName,attribute.fieldId,attribute.inputType,attribute.imeOptions)
         val owned=if (english) englishWord else displayedComposition()
         val same=restarting && inputStarted && editorKey==key
@@ -323,8 +345,11 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         publishVisibility()
         if (!sensitive && predictionsAllowed) runCatching {
             val mode=InputConnection.CURSOR_UPDATE_IMMEDIATE or InputConnection.CURSOR_UPDATE_MONITOR
-            if (Build.VERSION.SDK_INT>=33) currentInputConnection?.requestCursorUpdates(mode,InputConnection.CURSOR_UPDATE_FILTER_INSERTION_MARKER)
-            else currentInputConnection?.requestCursorUpdates(mode)
+            val connection=currentInputConnection
+            if (Build.VERSION.SDK_INT<33 || connection?.requestCursorUpdates(mode,
+                    InputConnection.CURSOR_UPDATE_FILTER_INSERTION_MARKER or InputConnection.CURSOR_UPDATE_FILTER_EDITOR_BOUNDS)!=true) {
+                connection?.requestCursorUpdates(mode)
+            }
         }
         Handler(Looper.getMainLooper()).post { if (session==startedSession) applyVisibility(false) }
     }
@@ -454,9 +479,9 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         hardwareCandidates=false; closeHardwarePanel(true); hardwarePanel.clearCursor()
         committedTail=null; continuationCandidates=false
         candidateJob?.cancel(); candidateQuery=null; candidateLoading=false; requestedReading=""; requestedLimit=0
-        invalidateTranslation(); resetVariant(); composer.clear(); englishWord=""; candidates=emptyList(); candidateRecords=emptyList(); selected=-1; converting=false
+        invalidateTranslation(); resetVariant(); composer.clear(); englishWord=""; candidates=emptyList(); candidateRecords=emptyList(); candidateLists=CandidateLists(); selected=-1; converting=false
         ui?.googleComposition(null)
-        ui?.candidates(emptyList(),-1,{})
+        ui?.candidates(CandidateLists(),-1,{})
     }
     private fun resetConversion() { selected=-1; converting=false }
     private fun refreshCandidates() {
@@ -476,7 +501,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                     // Space/Enter stays ordered even when pressed immediately after typing.
                     setCandidateRecords(personalized(query))
                 } else {
-                    if (!retain) setCandidateRecords(if (converting) personalized(query.copy(limit=64)) else emptyList())
+                    if (!retain) setCandidateRecords(if (converting) personalized(query.copy(limit=64)) else CandidateLists())
                     candidateLoading=true
                     candidateJob=scope.launch {
                         delay(12)
@@ -492,13 +517,9 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             val tail=committedTail
             val next=if (contextAllowed && inputStarted && !english && composer.isEmpty && settings.japanesePrediction && tail!=null && validTail(tail)) {
                 continuationCandidates=true
-                NextWordPrediction.candidates(tail.word,
-                    if (settings.learningEnabled && learningAllowed) app.learning.state.value.continuations.filter { c ->
-                        tail.word.text.endsWith(c.context) && c.context.length<=32 && c.text.length<=32 && c.reading.length<=32 &&
-                            ((conversion as? DictionaryConversionEngine)?.knownChoice(c.reading,c.text)==true ||
-                                c.text in PhrasePrediction.candidates(c.reading,false).map { it.text } ||
-                                c.text in SemanticConversion.equivalents(app.semanticDictionary.lexicon.value,c.reading,c.reading))
-                    } else emptyList(),settings.candidateCount)
+                JapaneseCandidates.next(tail.word,
+                    if (settings.learningEnabled && learningAllowed) app.learning.state.value.continuations else emptyList(),
+                    conversion, app.semanticDictionary.lexicon.value, settings.candidateCount)
             } else emptyList()
             setCandidateRecords(if (predictionsAllowed && english && settings.englishPrediction) {
                 val words=EnglishPrediction.candidates(englishWord,10_000).map { Candidate(it,it.lowercase()) }
@@ -508,41 +529,18 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         }
         showCandidates()
     }
-    private fun personalized(query: CandidateQuery): List<Candidate> {
-        val converted=(query.engine as? DictionaryConversionEngine)?.candidates(query.reading,query.prediction,query.limit,query.learning.entries,query.learning.continuations)
-            ?: query.engine.candidates(query.reading,query.prediction,query.limit)
-        val reading=Personalization.normalize(query.reading)
-        val counterForms=query.expressions.words[reading].orEmpty().map { Candidate(it,reading) }
-        val general=(counterForms+PhrasePrediction.candidates(query.reading,query.prediction)+converted).distinctBy { it.text }
-        val aliases=SymbolCandidates.candidates(query.reading,query.expressions.symbols,query.prediction)
-        val symbols=(aliases+SymbolCandidates.candidates(query.reading,query.symbols,query.prediction))
-            .distinctBy { it.text }.map { it.copy(kind=CandidateKind.SYMBOL) }
-        val expressions=query.expressions.find(query.reading,false,query.prediction,query.emoji,query.face,query.limit==10000).ifEmpty {
-            // CLDR also indexes words written in kanji (e.g. 自動車). Try just the
-            // strongest dictionary matches, keeping the original reading for selection.
-            general.asSequence().take(4).filter { it.reading==reading && it.text!=reading }
-                .flatMap { query.expressions.find(it.text,false,false,query.emoji,query.face,query.limit==10000).asSequence() }
-                .distinctBy { it.text }.take(if (query.limit==10000) 10000 else 6).map { it.copy(reading=reading) }.toList()
-        }
-        val equivalents=SemanticConversion.augment(query.reading,general,query.semantic,query.limit)
-        val context=query.context?.let { NextWordPrediction.candidates(it,query.learning.continuations,64) }.orEmpty()
-            .filter { it.reading==query.reading || query.prediction && it.reading.startsWith(query.reading) }
-        val leading=equivalents.filter { it.directlyMatches(reading) }.take(5)
-        val words=(leading+context.map { it.copy(kind=CandidateKind.RELATED) }+equivalents).distinctBy { it.text }
-        val early=if (aliases.any { it.reading==Personalization.normalize(query.reading) }) aliases.take(6) else emptyList()
-        val combined=(words.take(5)+early+expressions.take(10)+
-            words.drop(5).take((query.limit-symbols.size-expressions.size-7).coerceAtLeast(0))+symbols+expressions+
-            listOf(Candidate(reading,reading),Candidate(SemanticConversion.katakana(reading),reading))).distinctBy { it.text }
-        // Legacy whole-input records are considered only if still supported by the dictionaries.
-        val history=query.learning.entries.filter { h ->
-            (h.reading==query.reading || query.prediction && h.reading.startsWith(query.reading)) &&
-                (query.engine as? DictionaryConversionEngine)?.knownChoice(h.reading,h.text)==true ||
-                (h.reading==query.reading && (h.text in symbols.map { it.text } || h.text in SemanticConversion.equivalents(query.semantic,h.reading,h.reading) ||
-                    h.text in PhrasePrediction.candidates(h.reading,false).map { it.text }))
-        }
-        return Personalization.candidates(query.reading,combined,history,query.prediction,query.limit,context.map { it.text }.toSet())
-    }
+    private fun personalized(query: CandidateQuery): CandidateLists = JapaneseCandidates.generate(
+        query.reading, query.prediction, query.limit, query.engine, query.learning.entries, query.learning.continuations,
+        query.semantic, query.symbols, query.expressions, query.emoji, query.face, query.context,
+    )
     private fun setCandidateRecords(values: List<Candidate>) {
+        setCandidateRecords(CandidateLists(values,
+            values.filter { english && it.directlyMatches(englishWord) },
+            values.filter { it.kind == CandidateKind.EMOJI }, values.filter { it.kind == CandidateKind.FACE }))
+    }
+    private fun setCandidateRecords(lists: CandidateLists) {
+        val values = lists.all
+        candidateLists = lists
         val chosen=if (converting || continuationCandidates) candidateRecords.getOrNull(selected)?.text else null
         candidateRecords=values; candidates=values.map { it.text }
         if (chosen!=null) selected=candidates.indexOf(chosen)
@@ -552,24 +550,36 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val canExpand=candidateQuery?.let { it.limit<10000 && candidates.size>=it.limit }==true
         ui?.googleComposition(variant?.takeIf { it.googlePowered }?.text)
         val reading=if (english) englishWord else composer.reading
-        ui?.candidates(candidates,selected,::commitCandidate,canExpand,candidateLoading,candidateRecords,reading)
+        val shown=candidateLists
+        val editorSession=session
+        ui?.candidates(shown,selected,{ candidate ->
+            if (session==editorSession && candidateLists===shown) commitCandidate(candidate)
+        },canExpand,candidateLoading,reading)
         showHardwareCandidates()
     }
     private fun showHardwareCandidates() {
+        val needsCandidateHost=visibility.mode==DisplayMode.HIDDEN || !editorRequested
+        if (needsCandidateHost && settings.hideImeCaption) {
+            // Opening the candidate host can make Android show its IME navigation controls.
+            // Conversion itself still runs in the editor through the active InputConnection.
+            closeHardwarePanel(releaseHost=true)
+            return
+        }
         if (!hardwareCandidates || !hasEditor() || sensitive || english || !japaneseConversionAllowed ||
             (!converting && !continuationCandidates) || selected !in candidates.indices) {
             closeHardwarePanel(); return
         }
-        if ((visibility.mode==DisplayMode.HIDDEN || !editorRequested) && !candidateHostRequested) {
+        if (needsCandidateHost && !candidateHostRequested) {
             candidateHostRequested=true
             setCandidatesViewShown(true)
+            updateCaptionVisibility()
             // A fresh official show request is also needed after a previous hide request.
             // onEvaluateInputViewShown still keeps the letter keys hidden.
             if (Build.VERSION.SDK_INT>=28) requestShowSelf(0) else showLegacy()
         }
-        val top=ui?.root?.takeIf { visibility.mode!=DisplayMode.HIDDEN && isInputViewShown && it.isShown }
-            ?.let { view -> IntArray(2).also(view::getLocationOnScreen)[1] }
-        hardwarePanel.show(window?.window?.decorView?.windowToken,candidates,selected,continuationCandidates,top)
+        val host=window?.window?.decorView ?: return
+        val top=visibleKeyboard()?.let { view -> IntArray(2).also(view::getLocationOnScreen)[1] }
+        hardwarePanel.show(host,candidates,selected,continuationCandidates,top)
     }
     private fun closeHardwarePanel(releaseHost: Boolean=false) {
         hardwarePanel.dismiss()
@@ -617,13 +627,17 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             val engine=conversion as? DictionaryConversionEngine
             val semantic=app.semanticDictionary.lexicon.value
             val symbolEntries=app.symbols.entries.value
+            val expressions=app.expressions.entries.value
             scope.launch(Dispatchers.Default) {
                 fun units(word: Candidate): List<Candidate> {
                     val parts=engine?.learningUnits(word.reading,word.text).orEmpty()
                     if (parts.isNotEmpty()) return parts
                     return if (word.text in symbolEntries[Personalization.normalize(word.reading)].orEmpty() ||
+                        word.text in expressions.symbols[Personalization.normalize(word.reading)].orEmpty() ||
+                        word.text in expressions.words[Personalization.normalize(word.reading)].orEmpty() ||
+                        word.evidence?.reason in setOf(CandidateReason.EXPRESSION_EXACT, CandidateReason.EXPRESSION_MEANING) ||
                         word.text in SemanticConversion.equivalents(semantic,word.reading,word.reading) ||
-                        word in PhrasePrediction.candidates(word.reading,false)) listOf(word) else emptyList()
+                        PhrasePrediction.candidates(word.reading,false).any { it.text == word.text }) listOf(word) else emptyList()
                 }
                 val parts=units(candidate)
                 val before=previous?.let { units(it.word).lastOrNull() }
@@ -646,20 +660,22 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             val previous=committedTail?.takeIf { validTail(it,displayedComposition()) }
             if (currentInputConnection?.commitText(candidate.text,1)==true) {
                 if (variant?.googlePowered==true) committedTail=null
-                else confirmed(candidate,previous,learn)
+                else confirmed(candidate,previous,learn && variant==null && converting && selected in candidateRecords.indices)
             }
         }
         resetVariant(); composer.clear(); resetConversion(); refreshCandidates()
     }
     private fun commitCandidate(index: Int) {
-        if (!hasEditor() || index !in candidates.indices) return
+        candidateRecords.getOrNull(index)?.let(::commitCandidate)
+    }
+    private fun commitCandidate(candidate: Candidate) {
+        if (!hasEditor()) return
         compositionRestoreJob?.cancel(); compositionRestoreJob=null
         rotationComposition=null; composingEnd=null
         hardwareCandidates=false
         if (continuationCandidates) {
             val tail=committedTail
             if (tail==null || !validTail(tail) || !composer.isEmpty) { committedTail=null; refreshCandidates(); return }
-            val candidate=candidateRecords[index]
             invalidateTranslation()
             if (currentInputConnection?.commitText(candidate.text,1)==true) confirmed(candidate,tail,true)
             resetConversion(); refreshCandidates(); return
@@ -669,9 +685,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         resetVariant()
         if (english) {
             // English prediction owns a composing span, so no unrelated committed text is removed.
-            currentInputConnection?.commitText(candidates[index],1); englishWord=""
+            currentInputConnection?.commitText(candidate.text,1); englishWord=""
         } else {
-            val candidate=candidateRecords[index]
             val previous=committedTail?.takeIf { validTail(it,composing) }
             if (currentInputConnection?.commitText(candidate.text,1)==true) confirmed(candidate,previous,true)
             composer.clear()

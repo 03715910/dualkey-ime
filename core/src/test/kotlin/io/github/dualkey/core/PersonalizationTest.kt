@@ -5,22 +5,18 @@ import org.junit.Test
 
 class PersonalizationTest {
     private val base=listOf(Candidate("感じ","かんじ"),Candidate("漢字","かんじ"),Candidate("幹事","かんじ"))
-    @Test fun frequencyRanksConfirmedChoicesAndRecencyOnlyBreaksTies() {
-        val history=listOf(LearnedChoice("かんじ","漢字",5,10),LearnedChoice("かんじ","幹事",2,1000))
-        assertEquals(listOf("漢字","幹事","感じ"),Personalization.candidates("かんじ",base,history,false,100).map { it.text })
-        assertEquals("幹事",Personalization.candidates("かんじ",base,history+LearnedChoice("かんじ","幹事",5,2000),false,100).first().text)
-    }
-    @Test fun learnedFullReadingsCompletePrefixesAndDoNotLeakIntoUnrelatedQueries() {
-        val history=listOf(LearnedChoice("いいかんじ","いい感じ",3,1),LearnedChoice("かんじ","幹事",8,2))
-        val predicted=Personalization.candidates("いいか",emptyList(),history,true,100)
-        assertEquals(Candidate("いい感じ","いいかんじ"),predicted.first())
-        assertTrue(Personalization.candidates("いいか",emptyList(),history,false,100).isEmpty())
-        assertTrue(Personalization.candidates("とうきょう",emptyList(),history,true,100).isEmpty())
-        assertTrue(Personalization.candidates("",base,history,true,100).isEmpty())
-    }
-    @Test fun unlearnedDefaultAndClearedHistoryKeepSystemOrder() {
-        assertEquals(base,Personalization.candidates("かんじ",base,emptyList(),false,100))
-        assertEquals("感じ",Personalization.candidates("カンジ",base,listOf(LearnedChoice("かんじ","感じ",1,1)),false,100).first().text)
+    @Test fun oneSelectionDoesNotChangeRankAndRepeatedSelectionIsBounded() {
+        val key = "かんじ"
+        val now = 2_000_000_000_000L
+        val choices = (0..12).map { Candidate("候補$it", key) }
+        fun rank(index: Int, count: Int, lastUsed: Long = now) =
+            Personalization.rank(choices, mapOf(choices[index].text to LearnedChoice(key, choices[index].text, count, lastUsed)), now)
+        assertEquals(choices.map { it.text }, rank(1, 1).map { it.text })
+        assertEquals(choices[2].text, rank(2, 4).first().text)
+        assertEquals(8, rank(12, 1000).indexOfFirst { it.text == choices[12].text })
+        assertEquals(choices.first().text, rank(1, 1000, 1).first().text)
+        assertEquals(4, rank(2, 4).first().alternatives.single().choice?.count)
+        assertEquals(base, Personalization.rank(base, emptyMap(), now))
     }
     @Test fun onlyBoundedJapaneseReadingsAndConfirmedDisplayStringsAreAccepted() {
         assertTrue(Personalization.valid("よし","𠮷"))

@@ -43,15 +43,16 @@ class EditingAndPredictionTest {
         assertTrue(PhrasePrediction.candidates("おは",false).isEmpty())
         assertEquals("いい天気ですね",NextWordPrediction.candidates(Candidate("今日は","きょうは"),emptyList(),30).first().text)
     }
-    @Test fun contextCanOutweighOneOldChoiceWithoutLosingRepeatedPreferences() {
+    @Test fun oneChoiceCannotDisplaceAContextuallySupportedMatch() {
         val base=listOf(Candidate("感じ","かんじ"),Candidate("漢字","かんじ"))
-        val once=listOf(LearnedChoice("かんじ","漢字",1,1))
-        assertEquals("感じ",Personalization.candidates("かんじ",base,once,false,30,setOf("感じ")).first().text)
-        assertEquals("漢字",Personalization.candidates("かんじ",base,listOf(once[0].copy(count=100)),false,30,setOf("感じ")).first().text)
+        val choice=LearnedChoice("かんじ","漢字",1,1)
+        assertEquals("感じ",Personalization.rank(base,mapOf(choice.text to choice),1,mapOf("感じ" to base.first())).first().text)
+        assertEquals("漢字",Personalization.rank(base,mapOf(choice.text to choice.copy(count=100)),1,mapOf("感じ" to base.first())).first().text)
     }
-    @Test fun wordPairUsagePromotesWholeModelPhrasesWithoutStoringThePhrase() {
-        val pairs=listOf(LearnedContinuation("を","見せ","みせ",3,1))
-        assertEquals("見せてください",NextWordPrediction.candidates(Candidate("続きを","つづきを"),pairs,30).first().text)
+    @Test fun repeatedSpecificWordPairPromotesFullModelPhrase() {
+        val pairs=listOf(LearnedContinuation("続きを","見せ","みせ",4,1))
+        assertEquals("見せてください",NextWordPrediction.candidates(Candidate("続きを","つづきを"),pairs,30,now=1).first().text)
+        assertEquals("お願いします",NextWordPrediction.candidates(Candidate("続きを","つづきを"),pairs.map { it.copy(count=1) },30,now=1).first().text)
     }
     @Test fun bundledSymbolDataSuppliesBroadReadingsAndUnicodeVariants() {
         val entries=linkedMapOf<String,MutableList<String>>()

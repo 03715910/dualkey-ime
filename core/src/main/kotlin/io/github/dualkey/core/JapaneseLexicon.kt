@@ -15,6 +15,7 @@ class JapaneseLexicon private constructor(private val data: ByteBuffer) {
     val readingCount = data.getInt(8)
     val entryCount = data.getInt(12)
     private val dimension = data.getInt(16)
+    internal val hasBundledPos get() = dimension == 2672
     private val maxLength = data.getInt(20)
     private val keys = data.getInt(24)
     private val entries = data.getInt(28)

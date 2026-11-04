@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.ParcelFileDescriptor
 import android.os.SystemClock
 import android.graphics.Bitmap
+import android.graphics.Rect
 import android.view.KeyEvent
 import android.view.accessibility.AccessibilityNodeInfo
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -215,6 +216,36 @@ class ImeVisibilityDeviceTest {
         rotate(false); letters("uha"); await("composition retained") { text()=="きょうは" }
         assertTrue(ImeControl.state.value.keyboardVisible)
         click("end-input"); stableHidden(); assertFalse(ImeControl.state.value.editorActive)
+    }
+
+    @Test fun hardwareCandidatesFitAboveTheMultilineEditorInBothOrientations() {
+        runBlocking { app.settings.set(Prefs.hideImeCaption,false); app.settings.state.first { !it.hideImeCaption } }
+        fun find(node: AccessibilityNodeInfo?,description: String): AccessibilityNodeInfo? {
+            if (node==null) return null
+            if (node.contentDescription?.toString()==description) return node
+            return (0 until node.childCount).firstNotNullOfOrNull { find(node.getChild(it),description) }
+        }
+        fun node(description: String)=automation.windows.firstNotNullOfOrNull { find(it.root,description) }
+        for (landscape in listOf(false,true)) {
+            rotate(landscape); click("edit")
+            // The manual hidden mode intentionally persists across editor sessions.
+            await("active bottom editor") { ImeControl.state.value.editorActive }
+            main { ImeControl.request(DisplayMode.HIDDEN) }; stableHidden()
+            letters("kyou"); instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_SPACE)
+            await("visible candidate in landscape=$landscape") { node("物理候補：今日")?.isVisibleToUser==true }
+            val panel=Rect().also(node("物理キーボードの候補一覧")!!::getBoundsInScreen)
+            val field=Rect().also(node("fixture-editor")!!::getBoundsInScreen)
+            val display=automation.takeScreenshot()
+            try {
+                assertTrue("Panel is inside the display: $panel",Rect(0,0,display.width,display.height).contains(panel))
+                assertTrue("Panel $panel is above the bottom editor $field",panel.bottom<=field.top)
+            } finally { display.recycle() }
+            assertFalse(ImeControl.state.value.keyboardVisible)
+            instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ENTER)
+            await("panel dismissed") { node("物理キーボードの候補一覧")==null && text()?.endsWith("今日")==true }
+            click("end-input"); stableHidden()
+            await("editor closed") { !ImeControl.state.value.editorActive }
+        }
     }
     @Test fun systemDismissalIsRespectedOnRotationAndExplicitShowStillWorks() {
         edit(); letters("kyou"); instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK)

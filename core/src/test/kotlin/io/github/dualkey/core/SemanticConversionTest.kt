@@ -29,24 +29,26 @@ class SemanticConversionTest {
         assertNull(SemanticConversion.english(lexicon,"これはみとうろくのちょうぶんです","これは未登録の長文です"))
     }
     @Test fun additionsKeepLeadingJapaneseChoicesAndCanBeLearned() {
-        val base=LocalConversionEngine().candidates("みず",false,30)
-        val values=SemanticConversion.augment("みず",base,lexicon,30)
+        val engine=LocalConversionEngine()
+        val values=JapaneseCandidates.generate("みず",false,30,engine,semantic=lexicon).all
         assertEquals("水",values.first().text)
         assertTrue(values.toString(),values.any { it.text=="ミズ" })
         assertTrue(values.toString(),values.any { it.text=="water" })
         assertEquals(values.size,values.map { it.text }.distinct().size)
         assertTrue(values.size<=30)
-        val ranked=Personalization.candidates("みず",values,listOf(LearnedChoice("みず","water",3,10)),false,30)
-        assertEquals("water",ranked.first().text)
+        val history=listOf(LearnedChoice("みず","water",30,10))
+        val ranked=JapaneseCandidates.generate("みず",false,30,engine,history=history,semantic=lexicon,now=10).all
+        assertEquals("水",ranked.first().text)
+        assertTrue(ranked.first { it.text=="water" }.alternatives.any { it.choice?.count==30 })
     }
     @Test fun japaneseChoiceDisambiguatesWordsWithTheSameReading() {
-        val bridge=SemanticConversion.augment("はし",listOf(Candidate("橋","はし")),lexicon,30).map { it.text }
-        val chopsticks=SemanticConversion.augment("はし",listOf(Candidate("箸","はし")),lexicon,30).map { it.text }
+        val bridge=SemanticConversion.suggestions("はし","橋",lexicon).map { it.text }
+        val chopsticks=SemanticConversion.suggestions("はし","箸",lexicon).map { it.text }
         assertTrue(bridge.toString(),"bridge" in bridge)
         assertFalse(bridge.toString(),"chopsticks" in bridge)
         assertTrue(chopsticks.toString(),"chopsticks" in chopsticks)
         assertFalse(chopsticks.toString(),"bridge" in chopsticks)
-        val chair=SemanticConversion.augment("いす",listOf(Candidate("椅子","いす")),lexicon,30).map { it.text }
+        val chair=SemanticConversion.suggestions("いす","椅子",lexicon).map { it.text }
         assertTrue("chair" in chair)
         assertFalse("swords" in chair)
     }

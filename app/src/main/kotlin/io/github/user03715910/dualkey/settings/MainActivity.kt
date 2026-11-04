@@ -330,6 +330,7 @@ class MainActivity : AppCompatActivity() {
             toggle("手動で選んだ表示を次回も使う",Prefs.rememberManual,s.rememberManual)
             text("接続を解除すると通常表示に戻ります。完全非表示からは、ホームの表示ボタンで復帰できます。")
             toggle("完全非表示時は下部バーも隠す",Prefs.hideImeCaption,s.hideImeCaption)
+            text("オンにすると、完全非表示中は入力欄に変換中の候補を表示します。Spaceや矢印で選び、Enterで確定できます。オフにすると候補一覧を表示でき、端末によっては下部バーも表示されます。")
             text("対応するAndroidでは、キーボード切替と下向き矢印のバーも隠します。通常表示へ戻すと復帰します。機種・OSによっては端末側の表示設定も必要です。")
         }
         section("通知から切り替え") {

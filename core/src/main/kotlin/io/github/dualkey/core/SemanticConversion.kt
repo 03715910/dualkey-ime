@@ -12,20 +12,17 @@ object SemanticConversion {
     fun english(lexicon: JapaneseLexicon?, reading: String, japanese: String) =
         equivalents(lexicon,reading,japanese).firstOrNull { value -> value.any { it in 'a'..'z' || it in 'A'..'Z' } }
 
-    /** Reserve a small tail for equivalents; preserve the leading Japanese order. */
-    fun augment(reading: String, base: List<Candidate>, lexicon: JapaneseLexicon?, limit: Int): List<Candidate> {
-        val maximum=limit.coerceIn(2,10000)
-        if (reading.none { it in 'ぁ'..'ゖ' }) return base.take(maximum)
-        val japanese=base.firstOrNull { it.reading==reading }?.text ?: reading
-        val meanings=equivalents(lexicon,reading,japanese)
-        val additions=(listOf(katakana(reading)) + meanings.filter { it.any { c -> c in 'ァ'..'ヶ' } } +
-            meanings.filter { it.any { c -> c in 'a'..'z' || c in 'A'..'Z' } })
-            .distinct().filter { value -> base.take(8).none { it.text==value } }.take(minOf(8,maximum/3))
-        if (additions.isEmpty()) return base.take(maximum)
-        val extraSet=additions.toSet()
-        val leading=base.filterNot { it.text in extraSet }.take(maximum-additions.size)
-        return leading + additions.map { value -> base.firstOrNull { it.text==value }
-            ?: Candidate(value,reading,if (value==katakana(reading)) CandidateKind.WORD else CandidateKind.RELATED) }
+    fun suggestions(reading: String, japanese: String, lexicon: JapaneseLexicon?): List<Candidate> {
+        if (reading.none { it in 'ぁ'..'ゖ' }) return emptyList()
+        // Candidate suggestions use the selected Japanese sense. A reading-only
+        // fallback could surface another homophone (e.g. a noun for a number).
+        val meanings = lexicon?.exact(Personalization.normalize(japanese), 24).orEmpty().map { it.text }.distinct()
+        val katakana = meanings.filter { text -> text.any { it in 'ァ'..'ヶ' } }.take(4)
+        val english = meanings.filter { text -> text.any { it in 'a'..'z' || it in 'A'..'Z' } }.take(8)
+        return (katakana + english).distinct().map {
+            Candidate(it, reading, CandidateKind.RELATED,
+                CandidateEvidence(CandidateReason.MEANING, CandidateSource.JMDICT, reading, context = japanese))
+        }
     }
 }
 

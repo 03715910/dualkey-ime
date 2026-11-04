@@ -446,25 +446,54 @@ class DeviceInputTest {
         KeyboardVisibilityNotification.refresh(app)
         await("control notification posted") { controlNotification()!=null }
     }
-    private fun bottomEditor() {
+    private fun bottomEditor(multiline: Boolean=false, reportsCursor: Boolean=true) {
         ImeControl.request(DisplayMode.HIDDEN); await("letter keys hidden") { imeHeight()==0 }
         main {
             val margin=(ViewCompat.getRootWindowInsets(activity.window.decorView)?.getInsets(WindowInsetsCompat.Type.systemBars())?.bottom ?: 0)+4
             val overlay=android.widget.FrameLayout(activity)
-            editor=EditText(activity).apply {
-                setSingleLine(true); inputType=InputType.TYPE_CLASS_TEXT; hint="画面下端の入力欄"
+            editor=object : EditText(activity) {
+                override fun onCreateInputConnection(outAttrs: android.view.inputmethod.EditorInfo): android.view.inputmethod.InputConnection? {
+                    val connection=super.onCreateInputConnection(outAttrs) ?: return null
+                    if (reportsCursor) return connection
+                    return object : android.view.inputmethod.InputConnectionWrapper(connection,false) {
+                        override fun requestCursorUpdates(cursorUpdateMode: Int)=false
+                        override fun requestCursorUpdates(cursorUpdateMode: Int,cursorUpdateFilter: Int)=false
+                    }
+                }
+            }.apply {
+                id=View.generateViewId()
+                setSingleLine(!multiline)
+                inputType=InputType.TYPE_CLASS_TEXT or (if (multiline) InputType.TYPE_TEXT_FLAG_MULTI_LINE else 0)
+                hint="画面下端の入力欄"
                 setBackgroundColor(android.graphics.Color.WHITE)
             }
-            overlay.addView(editor,android.widget.FrameLayout.LayoutParams(-1,(56*activity.resources.displayMetrics.density).toInt(),Gravity.BOTTOM).apply { bottomMargin=margin })
+            val height=((if (multiline) 96 else 56)*activity.resources.displayMetrics.density).toInt()
+            overlay.addView(editor,android.widget.FrameLayout.LayoutParams(-1,height,Gravity.BOTTOM).apply { bottomMargin=margin })
             activity.addContentView(overlay,android.view.ViewGroup.LayoutParams(-1,-1)); editor.requestFocus()
         }
         instrumentation.waitForIdleSync()
+        await("bottom editor served") { "fieldId=${editor.id}\n" in diagnostic().replace("\r\n","\n") }
     }
     @Test fun hiddenCaptionLeavesTheBottomEditorVisibleAndTouchableDuringHardwareConversion() {
-        bottomEditor(); letters("KYOU"); key(KeyEvent.KEYCODE_SPACE)
-        await("PC candidate above bottom editor") { hardwareNode("物理候補：今日")!=null }
-        await("no additional bottom keyboard bar") { imeHeight()==0 }
-        captureHardware("bottom-editor-without-bar")
+        fun assertImeClosed() {
+            val state=diagnostic()
+            assertTrue(state,"windowShown=false" in state && "candidateHost=false" in state)
+            assertEquals(0,imeHeight())
+            assertNull(hardwareNode("物理キーボードの候補一覧"))
+        }
+        bottomEditor(); letters("KYOU")
+        assertEquals("きょう",inputText()); assertImeClosed()
+        key(KeyEvent.KEYCODE_SPACE)
+        assertEquals("今日",inputText()); assertImeClosed()
+        key(KeyEvent.KEYCODE_SPACE)
+        assertNotEquals("今日",inputText()); assertImeClosed()
+        key(KeyEvent.KEYCODE_DPAD_UP)
+        assertEquals("今日",inputText()); assertImeClosed()
+        key(KeyEvent.KEYCODE_ESCAPE)
+        assertEquals("きょう",inputText()); assertImeClosed()
+        key(KeyEvent.KEYCODE_HENKAN); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("今日",inputText()); assertImeClosed()
+        captureHardware("bottom-editor-after-hidden-conversion")
         var touched=false
         val bounds=Rect()
         main { editor.setOnTouchListener { _,event -> if (event.action==MotionEvent.ACTION_DOWN) touched=true; false }; editor.getGlobalVisibleRect(bounds) }
@@ -472,15 +501,48 @@ class DeviceInputTest {
         touch(Rect(bounds.left,bounds.bottom-16,bounds.right,bounds.bottom-4))
         main { assertTrue("The IME must not eat taps at the bottom of the input field",touched) }
     }
+    private fun allowCandidateWindowWhileHidden(allow: Boolean=true) {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking {
+            app.settings.set(Prefs.hideImeCaption,!allow)
+            app.settings.state.first { it.hideImeCaption!=allow }
+        }
+    }
+    @Test fun hardwareCandidatesKeepBottomMultilineEditorClearWithoutCursorUpdates() {
+        allowCandidateWindowWhileHidden()
+        bottomEditor(multiline=true,reportsCursor=false)
+        letters("KYOU"); key(KeyEvent.KEYCODE_SPACE)
+        await("candidate visible") { hardwareNode("物理候補：今日")?.isVisibleToUser==true }
+        val panel=hardwareNode("物理キーボードの候補一覧")!!
+        val panelBounds=Rect().also(panel::getBoundsInScreen)
+        main {
+            val editorOrigin=IntArray(2).also(editor::getLocationOnScreen)
+            val safe=Rect().also(activity.window.decorView::getWindowVisibleDisplayFrame)
+            assertTrue("Candidate window ${panelBounds} stays within ${safe}",safe.contains(panelBounds))
+            assertTrue("Candidate window leaves bottom editor and caret visible",panelBounds.bottom<=editorOrigin[1])
+            assertTrue("Bottom of the field is above system navigation",editorOrigin[1]+editor.height<=safe.bottom)
+        }
+        for (index in 0 until panel.childCount) {
+            val row=panel.getChild(index) ?: continue
+            assertTrue("Candidate row is visible",row.isVisibleToUser)
+            assertTrue(panelBounds.contains(Rect().also(row::getBoundsInScreen)))
+        }
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("今日",inputText())
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        assertCandidateOnly()
+    }
     @Test fun captionSettingCanRestoreTheBarAndFullKeyboardRestoresItAutomatically() {
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
-        runBlocking { app.settings.set(Prefs.hideImeCaption,false); app.settings.state.first { !it.hideImeCaption } }
+        allowCandidateWindowWhileHidden()
         ImeControl.request(DisplayMode.HIDDEN); await("keyboard hidden") { imeHeight()==0 }
         letters("KYOU"); key(KeyEvent.KEYCODE_SPACE)
         await("optional OS caption present") { imeHeight()>0 }
-        runBlocking { app.settings.set(Prefs.hideImeCaption,true); app.settings.state.first { it.hideImeCaption } }
-        key(KeyEvent.KEYCODE_SPACE)
-        await("caption hidden again") { imeHeight()==0 && hardwareNode("物理キーボードの候補一覧")!=null }
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("今日",inputText())
+        allowCandidateWindowWhileHidden(false)
+        await("caption and candidate host closed") { imeHeight()==0 && hardwareNode("物理キーボードの候補一覧")==null &&
+            "candidateHost=false" in diagnostic() && "windowShown=false" in diagnostic() }
         ImeControl.request(DisplayMode.FULL); await("full keyboard restored") { imeHeight()>300 }
         val command="dumpsys activity service ${app.packageName}/io.github.user03715910.dualkey.ime.DualKeyService"
         var diagnostic=""
@@ -600,6 +662,38 @@ class DeviceInputTest {
         letters("MO"); assertEquals("にほんも",inputText()); key(KeyEvent.KEYCODE_ENTER)
         key(KeyEvent.KEYCODE_DEL); assertEquals("にほん",inputText())
     }
+    @Test fun hardwareRomajiRepeatsAndDoubleNReplaceTheComposingSpan() {
+        key(KeyEvent.KEYCODE_W); assertEquals("w",inputText())
+        key(KeyEvent.KEYCODE_W,repeat=1); assertEquals("ww",inputText())
+        key(KeyEvent.KEYCODE_W,repeat=2); assertEquals("www",inputText())
+        key(KeyEvent.KEYCODE_ENTER); assertEquals("www",inputText())
+        letters("NN"); assertEquals("wwwん",inputText())
+        letters("K"); assertEquals("wwwんk",inputText())
+        letters("A"); assertEquals("wwwんか",inputText())
+        key(KeyEvent.KEYCODE_DEL); assertEquals("wwwん",inputText())
+        key(KeyEvent.KEYCODE_ENTER); assertEquals("wwwん",inputText())
+        key(KeyEvent.KEYCODE_DEL); assertEquals("www",inputText())
+        letters("NNK"); key(KeyEvent.KEYCODE_DEL); assertEquals("wwwん",inputText())
+        letters("A"); assertEquals("wwwんな",inputText())
+        key(KeyEvent.KEYCODE_ZENKAKU_HANKAKU)
+        letters("WW"); assertEquals("wwwんなww",inputText())
+        key(KeyEvent.KEYCODE_SPACE); assertEquals("wwwんなww ",inputText())
+    }
+
+    @Test fun screenQwertyUsesTheSameRomajiRules() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.japaneseLayout,"QWERTY"); app.settings.state.first { it.japaneseQwerty } }
+        val w=rect("w")
+        repeat(3) { touch(w) }
+        assertEquals("www",inputText())
+        touch(rect("↵"))
+        val n=rect("n")
+        touch(n); touch(n)
+        assertEquals("wwwん",inputText())
+        touch(w); assertEquals("wwwんw",inputText())
+        touch(rect("a")); touch(rect("↵"))
+        assertEquals("wwwんわ",inputText())
+    }
     @Test fun physicalJapaneseSymbolsAreFullWidthButEnglishSymbolsStayAscii() {
         key(KeyEvent.KEYCODE_SLASH,KeyEvent.META_SHIFT_ON); key(KeyEvent.KEYCODE_1,KeyEvent.META_SHIFT_ON)
         key(KeyEvent.KEYCODE_9,KeyEvent.META_SHIFT_ON); key(KeyEvent.KEYCODE_0,KeyEvent.META_SHIFT_ON)
@@ -635,6 +729,7 @@ class DeviceInputTest {
         main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
     }
     @Test fun hiddenHardwareConversionShowsOnlyTheCandidateWindowAndAllowsTouch() {
+        allowCandidateWindowWhileHidden()
         ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
         letters("KYOU"); key(KeyEvent.KEYCODE_HENKAN)
         await("floating candidates while keyboard hidden") { hardwareNode("物理候補：今日")!=null }
@@ -644,6 +739,7 @@ class DeviceInputTest {
         assertNull(hardwareNode("物理キーボードの候補一覧")); assertCandidateOnly()
     }
     @Test fun tabCyclesPostCommitPredictionsInHiddenModeAndShiftTabGoesBack() {
+        allowCandidateWindowWhileHidden()
         ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
         commitTsudukiwo()
         assertNull(hardwareNode("物理キーボードの候補一覧"))
@@ -725,19 +821,47 @@ class DeviceInputTest {
             withTimeout(10_000) { app.learning.state.first { it.revision>before && it.entries.isEmpty() && it.continuations.isEmpty() } }
             app.settings.set(Prefs.learningEnabled,true); app.settings.state.first { it.learningEnabled }
         }
-        commitTsudukiwo(); clickLabel("見せてください")
-        runBlocking { withTimeout(10_000) { app.learning.state.first { it.continuations.any { c -> "続きを".endsWith(c.context) && "見せてください".startsWith(c.text) } } } }
-        main { editor.setText("") }; instrumentation.waitForIdleSync()
-        commitTsudukiwo(); key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
-        assertEquals("続きを見せてください",inputText())
-        main {
-            editor.setText(""); editor.imeOptions=editor.imeOptions or android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
-            activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
+        fun resetEditor(privateMode: Boolean=false) {
+            main {
+                editor.setText("")
+                editor.id=View.generateViewId()
+                if (privateMode) editor.imeOptions=editor.imeOptions or android.view.inputmethod.EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING
+                activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
+            }
+            await("new test editor session") { "fieldId=${editor.id}\n" in diagnostic().replace("\r\n","\n") }
         }
-        SystemClock.sleep(200)
+        fun chooseContinuation(times: Int) {
+            repeat(times) {
+                resetEditor()
+                commitTsudukiwo(); clickLabel("見せてください")
+            }
+            runBlocking { withTimeout(10_000) {
+                app.learning.state.first { snapshot ->
+                    snapshot.continuations.any { c ->
+                        "続きを".endsWith(c.context) && "見せてください".startsWith(c.text) && c.count>=times
+                    }
+                }
+            } }
+        }
+        chooseContinuation(1)
+        resetEditor()
         commitTsudukiwo(); key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
         assertEquals("続きをお願いします",inputText())
-        assertFalse(app.learning.state.value.continuations.any { "続きを".endsWith(it.context) && "お願いします".startsWith(it.text) })
+        chooseContinuation(4)
+        resetEditor()
+        commitTsudukiwo(); key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("続きを見せてください",inputText())
+        // Learning the immediately preceding selection may still be in flight.
+        // Only the default continuation could have been newly learned in the private editor.
+        fun defaultContinuationUses()=app.learning.state.value.continuations.filter {
+            "続きを".endsWith(it.context) && "お願いします".startsWith(it.text)
+        }.sumOf { it.count }
+        val learningBeforePrivate=defaultContinuationUses()
+        resetEditor(privateMode=true)
+        commitTsudukiwo(); key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("続きをお願いします",inputText())
+        SystemClock.sleep(300)
+        assertEquals(learningBeforePrivate,defaultContinuationUses())
     }
     @Test fun physicalRomajiAndSpaceEnterConversion() {
         letters("KYOUHA"); await("きょうは") { inputText()=="きょうは" }
@@ -751,9 +875,21 @@ class DeviceInputTest {
             app.learning.awaitLoaded(); val before=app.learning.state.value.revision; app.learning.clear()
             withTimeout(10_000) { app.learning.state.first { it.revision>before && it.entries.isEmpty() } }
         }
-        letters("KANJI"); await("writing candidate") { findNode { it.text?.toString()=="漢字" }!=null }
-        clickLabel("漢字"); await("confirmed spelling") { inputText()=="漢字" }
-        runBlocking { withTimeout(10_000) { app.learning.state.first { it.entries.any { e -> e.reading=="かんじ" && e.text=="漢字" } } } }
+        fun chooseKanji(times: Int) {
+            repeat(times) {
+                main { editor.text.clear() }
+                letters("KANJI"); await("writing candidate") { findNode { it.text?.toString()=="漢字" }!=null }
+                clickLabel("漢字"); await("confirmed spelling") { inputText()=="漢字" }
+            }
+        }
+        fun awaitCount(count: Int) = runBlocking { withTimeout(10_000) {
+            app.learning.state.first { it.entries.any { e -> e.reading=="かんじ" && e.text=="漢字" && e.count==count } }
+        } }
+        chooseKanji(1); awaitCount(1)
+        main { editor.text.clear() }
+        letters("KANJI"); key(KeyEvent.KEYCODE_SPACE); assertEquals("感じ",inputText())
+        key(KeyEvent.KEYCODE_ESCAPE); key(KeyEvent.KEYCODE_ESCAPE)
+        chooseKanji(3); awaitCount(4)
         main { editor.text.clear() }
         letters("KANJI"); key(KeyEvent.KEYCODE_SPACE); assertEquals("漢字",inputText())
         key(KeyEvent.KEYCODE_ESCAPE); key(KeyEvent.KEYCODE_ESCAPE)
@@ -771,7 +907,7 @@ class DeviceInputTest {
         letters("KANJI"); key(KeyEvent.KEYCODE_SPACE); assertEquals("感じ",inputText())
         await("private alternate") { findNode { it.text?.toString()=="漢字" }!=null }
         clickLabel("漢字"); SystemClock.sleep(300)
-        assertEquals(1,app.learning.state.value.entries.first { it.reading=="かんじ" && it.text=="漢字" }.count)
+        assertEquals(4,app.learning.state.value.entries.first { it.reading=="かんじ" && it.text=="漢字" }.count)
     }
     private fun gridCandidate(test: (String)->Boolean): AccessibilityNodeInfo? {
         val list=findNode { it.contentDescription?.toString()=="変換候補の一覧" }
@@ -799,7 +935,9 @@ class DeviceInputTest {
     }
     @Test fun legacyCandidateLimitCanSearchForMore() {
         letters("KOU"); key(KeyEvent.KEYCODE_SPACE); touch(rect("一覧"))
-        assertNotNull("Saved setting of thirty does not stop scrolling",gridCandidate { it.startsWith("候補 81：") })
+        clickLabel("絞り込み")
+        assertNotNull("Exact mode has its own scrollable list beyond the saved limit",gridCandidate { it.startsWith("候補 81：") })
+        assertTrue(rect("すべて").right<=rect("絞り込み").left)
         assertNull(findNode { it.text?.toString()=="見る" || it.contentDescription?.toString()=="さらに候補を表示" })
     }
     @Test fun diamondFlickBubbleIsVisibleAndTracksTheDirection() {
@@ -872,6 +1010,26 @@ class DeviceInputTest {
         } }
         println("Dictionary searches on Android: median=${durations.sorted()[durations.size/2]}ms, max=${durations.max()}ms")
         assertTrue("Indexed searches stay bounded",durations.max()<1500)
+    }
+    @Test fun candidatePresentationProbe() {
+        val cases=listOf("NIKO" to "2個", "KYOU" to "今日", "OHA" to "おはよう",
+            "OHAYOU" to "おはよう", "ONPU" to "音符", "TEN" to "点",
+            "TENTENTEN" to "…", "ISU" to "椅子", "WATASHIHA" to "私は", "NIHONGO" to "日本語")
+        val samples=mutableListOf<Long>()
+        repeat(3) { pass ->
+            for ((romaji, candidate) in cases) {
+                main { editor.text.clear() }
+                letters(romaji.dropLast(1))
+                val start=SystemClock.elapsedRealtimeNanos()
+                letters(romaji.takeLast(1))
+                await("presented candidate $candidate") { findNode { it.text?.toString()==candidate }!=null }
+                if (pass>0) samples.add((SystemClock.elapsedRealtimeNanos()-start)/1_000_000)
+            }
+        }
+        val sorted=samples.sorted()
+        val memory=android.os.Debug.MemoryInfo().also(android.os.Debug::getMemoryInfo)
+        android.util.Log.i("DualKeyPredictionProbe",
+            "n=${sorted.size} median_ms=${sorted[sorted.size/2]} p95_ms=${sorted[(sorted.size*95+99)/100-1]} pss_kib=${memory.totalPss}")
     }
     @Test fun physicalContractedGeminatedAndN() {
         letters("KYONIHONGOSHACHATTANNA"); await("romaji sequence") { inputText()=="きょにほんごしゃちゃったんな" }

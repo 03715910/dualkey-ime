@@ -90,8 +90,52 @@ class JapaneseDictionaryTest {
     }
     @Test fun learnedWordCostsParticipateInsideASentence() {
         val before=engine.candidates("かんじがいい",false,100).map { it.text }
-        val after=engine.candidates("かんじがいい",false,100,listOf(LearnedChoice("かんじ","漢字",1000,1)),emptyList()).map { it.text }
+        val after=JapaneseCandidates.generate("かんじがいい",false,100,engine,history=listOf(LearnedChoice("かんじ","漢字",1000,1)),now=1).all.map { it.text }
         assertTrue(after.toString(),"漢字がいい" in after)
-        assertTrue("$before -> $after",after.indexOf("漢字がいい")<before.indexOf("漢字がいい") || after.first()=="漢字がいい")
+        assertTrue("$before -> $after",after.indexOf("漢字がいい")<=before.indexOf("漢字がいい"))
+        val details=JapaneseCandidates.generate("かんじがいい",false,100,engine,
+            history=listOf(LearnedChoice("かんじ","漢字",1000,1)),now=1).all.first { it.text=="漢字がいい" }.evidence!!
+        assertTrue(details.learningDiscount in 1..400)
+        assertNotNull(details.cost)
+    }
+    @Test fun typedAndExplicitRankingKeepDirectFormsWithoutWeakShortSuffixes() {
+        val expressions=ExpressionCandidates(words=mapOf("にこ" to listOf("2個","２個","二個")),
+            symbols=mapOf("てんてんてん" to listOf("…","・・・","⋯")))
+        for (prediction in listOf(true,false)) {
+            val nico=JapaneseCandidates.generate("にこ",prediction,100,engine,expressions=expressions)
+            assertEquals(listOf("2個","２個","二個","ニコ","にこ"),nico.all.take(5).map { it.text })
+            assertTrue(nico.all.none { it.evidence?.reason==CandidateReason.TAIL })
+            assertTrue(nico.exact.none { it.text in listOf("に来","にこれ","にコメント","に公開") })
+            val ellipsis=JapaneseCandidates.generate("てんてんてん",prediction,100,engine,expressions=expressions)
+            assertTrue(ellipsis.all.take(3).any { it.text=="…" })
+            assertTrue(ellipsis.exact.any { it.text=="⋯" })
+            assertEquals("日本語",engine.candidates("にほんご",prediction,100).first().text)
+            assertTrue(engine.candidates("にほんご",prediction,100).take(5).none { it.text=="日本5" })
+        }
+        assertTrue(engine.candidates("おは",true,100).take(3).any { it.text=="おはよう" })
+        assertFalse(engine.candidates("おは",false,100).any { it.text=="おはよう" })
+    }
+
+    @Test fun modesHaveIndependentCandidateBudgetsAndDedupKeepsAllEvidence() {
+        val emoji=(1..45).map { "😀$it" }
+        val faces=(1..45).map { "(^_^)$it" }
+        val expressions=ExpressionCandidates(ja=ExpressionIndex(mapOf("こう" to emoji)),
+            faces=ExpressionIndex(mapOf("こう" to faces)))
+        val lists=JapaneseCandidates.generate("こう",true,100,engine,expressions=expressions)
+        assertEquals(100,lists.exact.size)
+        assertTrue(lists.exact.any { candidate -> lists.all.none { it.text==candidate.text } })
+        assertTrue(lists.exact.all { it.directlyMatches("こう") })
+        val expanded=JapaneseCandidates.generate("こう",true,10000,engine,expressions=expressions)
+        assertEquals(emoji,expanded.emoji.map { it.text })
+        assertEquals(faces,expanded.face.map { it.text })
+
+        val entries=ExpressionCandidates(words=mapOf("にこ" to listOf("二個")))
+        val history=listOf(LearnedChoice("にこ","二個",4,10))
+        val result=JapaneseCandidates.generate("にこ",true,100,engine,history=history,expressions=entries,now=10)
+        val candidate=result.all.single { it.text=="二個" }
+        val provenance=listOfNotNull(candidate.evidence)+candidate.alternatives
+        assertTrue(provenance.any { it.reason==CandidateReason.COUNTER })
+        assertTrue(provenance.any { it.reason==CandidateReason.DICTIONARY_EXACT && it.wordCost!=null })
+        assertTrue(provenance.any { it.reason==CandidateReason.LEARNED && it.choice==history.single() })
     }
 }

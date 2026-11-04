@@ -25,6 +25,49 @@ class InputTest {
         c.clear(); assertTrue(c.isEmpty); assertFalse(c.delete())
         c.append("あ😀"); c.delete(); assertEquals("あ",c.text)
     }
+    @Test fun repeatedLettersOnlyFormSokuonBeforeAValidSyllable() {
+        assertRomajiSteps("www", listOf("w", "ww", "www"))
+        assertRomajiSteps("wa", listOf("w", "わ"))
+        assertRomajiSteps("wwa", listOf("w", "ww", "wわ"))
+        assertRomajiSteps("kko", listOf("k", "kk", "っこ"))
+        assertRomajiSteps("tta", listOf("t", "tt", "った"))
+        assertRomajiSteps("kkya", listOf("k", "kk", "kky", "っきゃ"))
+        assertRomajiSteps("aa", listOf("あ", "ああ"))
+        assertRomajiSteps("kyou", listOf("k", "ky", "きょ", "きょう"))
+    }
+
+    @Test fun doubleNReusesItsSecondKeyOnlyForAnNRowSyllable() {
+        assertRomajiSteps("nnka", listOf("n", "ん", "んk", "んか"))
+        assertRomajiSteps("nna", listOf("n", "ん", "んな"))
+        assertRomajiSteps("nni", listOf("n", "ん", "んに"))
+        assertRomajiSteps("nnwa", listOf("n", "ん", "んw", "んわ"))
+        assertRomajiSteps("nnya", listOf("n", "ん", "んny", "んにゃ"))
+        assertRomajiSteps("nn?", listOf("n", "ん", "ん？"))
+        assertRomajiSteps("na", listOf("n", "な"))
+        assertRomajiSteps("ni", listOf("n", "に"))
+        assertRomajiSteps("nka", listOf("n", "んk", "んか"))
+        val composer = Composer()
+        composer.append("nnk")
+        assertTrue(composer.delete())
+        assertEquals("ん", composer.text)
+        composer.append("a")
+        assertEquals("んな", composer.reading)
+        composer.clear()
+        composer.append("ww")
+        assertTrue(composer.delete())
+        composer.append("a")
+        assertEquals("わ", composer.reading)
+    }
+
+    private fun assertRomajiSteps(keys: String, displays: List<String>) {
+        val composer = Composer()
+        keys.forEachIndexed { index, key ->
+            composer.append(key.toString())
+            val prefix = keys.take(index + 1)
+            assertEquals(prefix, displays[index], composer.text)
+            assertEquals("$prefix on commit", if (prefix == "n") "ん" else displays[index], composer.reading)
+        }
+    }
     @Test fun deletesConvertedKanaRatherThanOriginalRomaji() {
         listOf("ka" to "", "k" to "", "ky" to "k", "nn" to "", "nna" to "ん",
             "tta" to "っ", "kyo" to "き", "nihongo" to "にほん", "kan" to "か").forEach { (raw,expected) ->

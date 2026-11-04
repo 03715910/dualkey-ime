@@ -15,15 +15,22 @@ object PhrasePrediction {
         "だいじょうぶです" to "大丈夫です", "またあした" to "また明日", "おやすみなさい" to "おやすみなさい")
     fun candidates(reading: String,prediction: Boolean): List<Candidate> = phrases.asSequence()
         .filter { it.first==reading || (prediction && reading.length>=2 && it.first.startsWith(reading)) }
-        .map { Candidate(it.second,it.first) }.toList()
+        .map { (key, text) -> Candidate(text, key, evidence = CandidateEvidence(
+            if (key == reading) CandidateReason.PHRASE else CandidateReason.PHRASE_PREFIX,
+            CandidateSource.PHRASE, key, reading.length)) }.toList()
 }
 
 object SymbolCandidates {
-    fun candidates(reading: String,entries: Map<String,List<String>>,prediction: Boolean): List<Candidate> {
+    fun candidates(reading: String,entries: Map<String,List<String>>,prediction: Boolean,
+        source: CandidateSource = CandidateSource.SYMBOL_DICTIONARY): List<Candidate> {
         val key=Personalization.normalize(reading)
-        val exact=entries[key].orEmpty().map { Candidate(it,key) }
+        fun symbol(text: String, matchedReading: String) = Candidate(text, matchedReading, CandidateKind.SYMBOL,
+            CandidateEvidence(if (matchedReading == key) CandidateReason.SYMBOL else CandidateReason.PREFIX,
+                source, matchedReading, key.length))
+        val exact=entries[key].orEmpty().map { symbol(it,key) }
         if (!prediction || key.length<2 || exact.isNotEmpty()) return exact
-        return entries.asSequence().filter { it.key.startsWith(key) }.take(24)
-            .flatMap { (r,v) -> v.asSequence().map { Candidate(it,r) } }.distinctBy { it.text }.take(64).toList()
+        val prefix = entries.asSequence().filter { it.key.startsWith(key) }.take(24)
+            .flatMap { (r,v) -> v.asSequence().map { symbol(it,r) } }.toList()
+        return mergeCandidates(prefix).take(64)
     }
 }

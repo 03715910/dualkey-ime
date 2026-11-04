@@ -48,20 +48,34 @@ object NextWordPrediction {
     fun valid(choice: LearnedContinuation) = validContext(choice.context) &&
         Personalization.valid(choice.reading,choice.text) && choice.count>0
 
-    fun candidates(context: Candidate,history: List<LearnedContinuation>,limit: Int): List<Candidate> {
+    fun candidates(context: Candidate,history: List<LearnedContinuation>,limit: Int,
+        now: Long = System.currentTimeMillis()): List<Candidate> {
         if (!validContext(context.text)) return emptyList()
-        val learned=history.asSequence().filter { (it.context==context.text || context.text.endsWith(it.context)) && valid(it) }
-            .sortedWith(compareByDescending<LearnedContinuation> { it.count }.thenByDescending { it.lastUsed }.thenBy { it.text })
-            .map { Candidate(it.text,it.reading) }.toList()
+        fun strength(pair: LearnedContinuation) = Personalization.strength(
+            LearnedChoice(pair.reading, pair.text, pair.count, pair.lastUsed), now)
+        // Suffix pairs only adjust existing model suggestions. New suggestions
+        // require the whole confirmed context to match.
+        val support = history.filter { valid(it) && context.text.endsWith(it.context) }
+            .map { it to strength(it) }.filter { it.second > 0 }
+            .sortedWith(compareByDescending<Pair<LearnedContinuation, Int>> { it.first.context.length }
+                .thenByDescending { it.second }.thenByDescending { it.first.lastUsed })
         val matching=rules.mapNotNull { rule ->
             rule.endings.filter { context.text.endsWith(it) || context.reading.endsWith(it) }
                 .maxOfOrNull { it.length }?.let { it to rule.choices }
-        }.sortedByDescending { it.first }.flatMap { it.second }
-        // A learned first word can promote a natural full expression without storing that sentence.
-        val support=history.filter { (it.context==context.text || context.text.endsWith(it.context)) && valid(it) }
-        val promoted=matching.distinctBy { it.text }.filter { candidate -> support.any { candidate.text.startsWith(it.text) } }
-            .sortedWith(compareByDescending<Candidate> { candidate -> support.filter { candidate.text.startsWith(it.text) }.sumOf { kotlin.math.ln(it.count+1.0) } }
-                .thenByDescending { candidate -> support.filter { candidate.text.startsWith(it.text) }.maxOfOrNull { it.lastUsed } ?: 0L })
-        return (promoted+learned+matching).distinctBy { it.text }.take(limit.coerceIn(2,1000))
+        }.sortedByDescending { it.first }.flatMap { it.second }.distinctBy { it.text }
+        fun learnedEvidence(pair: LearnedContinuation) = CandidateEvidence(CandidateReason.LEARNED,
+            CandidateSource.HISTORY, pair.reading, continuation = pair, context = pair.context)
+        val ranked = matching.mapIndexed { index, candidate ->
+            val pair = support.firstOrNull { candidate.text.startsWith(it.first.text) }
+            val shift = pair?.second?.coerceAtMost(2) ?: 0
+            val next = candidate.copy(evidence = CandidateEvidence(CandidateReason.NEXT_WORD,
+                CandidateSource.PHRASE, candidate.reading, 0, context = context.text))
+            (index * 2 - shift * 2 - if (shift > 0) 1 else 0) to next.withEvidence(listOfNotNull(pair?.first?.let(::learnedEvidence)))
+        }.sortedBy { it.first }.map { it.second }
+        val learned = support.filter { it.first.context == context.text }.map { (pair, _) ->
+            Candidate(pair.text, pair.reading, evidence = CandidateEvidence(CandidateReason.NEXT_WORD,
+                CandidateSource.HISTORY, pair.reading, 0, continuation = pair, context = pair.context))
+        }
+        return mergeCandidates(ranked.take(3) + learned + ranked.drop(3)).take(limit.coerceIn(2,1000))
     }
 }
