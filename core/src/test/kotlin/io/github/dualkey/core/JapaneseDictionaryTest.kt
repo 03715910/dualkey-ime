@@ -138,4 +138,65 @@ class JapaneseDictionaryTest {
         assertTrue(provenance.any { it.reason==CandidateReason.DICTIONARY_EXACT && it.wordCost!=null })
         assertTrue(provenance.any { it.reason==CandidateReason.LEARNED && it.choice==history.single() })
     }
+
+    @Test fun repeatedSymbolSelectionsPromoteTheOriginalReadingWithoutCrowdingShortPrefixes() {
+        val reading = "てんてんてん"
+        val now = 200L * 24 * 60 * 60 * 1000
+        val expressions = ExpressionCandidates(symbols = mapOf(
+            "てん" to listOf("・", "、", "."), "てんてん" to listOf("‥", "・・", ":"),
+            reading to listOf("…", "・・・", "⋯", "……", "⋮", "⋱"),
+        ))
+        fun results(key: String, uses: Int, prediction: Boolean = true, lastUsed: Long = now) =
+            JapaneseCandidates.generate(key, prediction, 64, engine, expressions = expressions, now = now,
+                history = listOf(LearnedChoice(reading, "⋯", uses, lastUsed), LearnedChoice(reading, "…", 1, now)))
+        fun List<Candidate>.rank(text: String) = indexOfFirst { it.text == text } + 1
+        for (prediction in listOf(true, false)) {
+            val before = results(reading, 0, prediction).all
+            val afterOne = results(reading, 1, prediction).all
+            val after = results(reading, 6, prediction).all
+            assertEquals(1, before.rank("…"))
+            assertEquals(3, before.rank("⋯"))
+            assertEquals(before.rank("⋯"), afterOne.rank("⋯"))
+            assertEquals(1, after.rank("⋯"))
+            assertTrue(after.rank("…") > 1)
+            println("prediction=$prediction: ⋯ rank ${before.rank("⋯")} -> ${after.rank("⋯")} (6 uses); … rank ${after.rank("…")} (1 use)")
+        }
+        assertTrue(results("てんてん", 2).all.none { it.text == "⋯" })
+        assertTrue(results("てん", 5).all.none { it.text == "⋯" })
+        for ((key, uses) in listOf("てんてん" to 3, "てん" to 6)) {
+            val lists = results(key, uses)
+            val candidate = lists.all.single { it.text == "⋯" }
+            assertEquals(reading, candidate.reading)
+            assertEquals(key.length, candidate.evidence?.matchedLength)
+            assertEquals(CandidateKind.SYMBOL, candidate.kind)
+            assertEquals(3, lists.all.rank("⋯"))
+            assertTrue(lists.exact.none { it.text == "⋯" })
+            assertTrue(results(key, uses, prediction = false).all.none { it.text == "⋯" })
+            assertEquals(results(key, 0).all.first().text, lists.all.first().text)
+            println("$key: ⋯ rank ${lists.all.rank("⋯")} ($uses uses)")
+        }
+        assertEquals(results("て", 0).all.map { it.text }, results("て", 100).all.map { it.text })
+        assertTrue(results("てん", 6, lastUsed = 0).all.none { it.text == "⋯" })
+        val bothUsed = JapaneseCandidates.generate(reading, false, 64, engine, expressions = expressions, now = now,
+            history = listOf(LearnedChoice(reading, "⋯", 30, now), LearnedChoice(reading, "…", 10, now)))
+        assertEquals("⋯", bothUsed.all.first().text)
+
+        // Mozc's bundled symbol dictionary also lists ⋯ under the shorter てん reading.
+        val overlapping = JapaneseCandidates.generate("てん", true, 10000, engine, expressions = expressions, now = now,
+            symbols = mapOf("てん" to listOf("・", "、", "⋯")),
+            history = listOf(LearnedChoice(reading, "⋯", 6, now)))
+        assertEquals(3, overlapping.all.rank("⋯"))
+        assertEquals(reading, overlapping.all.single { it.text == "⋯" }.reading)
+        assertEquals("てん", overlapping.exact.single { it.text == "⋯" }.reading)
+    }
+
+    @Test fun conversionKeepsTheChosenPunctuationWidthInTheReading() {
+        assertTrue(JapaneseCandidates.generate("こんにちわ", false, 64, engine).all.any { it.text == "こんにちは" })
+        for (mark in listOf("！", "？", "!", "?")) {
+            val reading = "ほんとう$mark"
+            val results = JapaneseCandidates.generate(reading, false, 64, engine)
+            assertTrue(results.exact.any { it.text == reading && it.directlyMatches(reading) })
+            assertTrue(results.all.any { it.text == "本当$mark" })
+        }
+    }
 }

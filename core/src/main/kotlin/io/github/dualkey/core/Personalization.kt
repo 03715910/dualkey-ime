@@ -5,8 +5,14 @@ import java.text.Normalizer
 data class LearnedChoice(val reading: String, val text: String, val count: Int, val lastUsed: Long)
 
 object Personalization {
+    private val betweenWidePunctuation = Regex("[^！？]+")
+
     fun normalize(reading: String): String = Normalizer.normalize(reading,Normalizer.Form.NFKC)
         .map { if (it in 'ァ'..'ヶ') it-0x60 else it }.joinToString("")
+
+    internal fun normalizeComposition(reading: String): String =
+        if ('！' in reading || '？' in reading) betweenWidePunctuation.replace(reading) { normalize(it.value) }
+        else normalize(reading)
 
     fun valid(reading: String,text: String): Boolean = reading.length in 1..80 && text.length in 1..160 &&
         reading.all { it in 'ぁ'..'ゖ' || it=='ー' } && text.none { it.isISOControl() } &&
@@ -14,12 +20,15 @@ object Personalization {
 
     private const val HALF_LIFE = 90L * 24 * 60 * 60 * 1000
 
+    internal fun recentUses(choice: LearnedChoice, now: Long): Int {
+        val age = (now - choice.lastUsed.coerceAtLeast(0)).coerceAtLeast(0)
+        return choice.count shr (age / HALF_LIFE).coerceAtMost(30).toInt()
+    }
+
     /** Each doubling after the first selection buys one step, with a four-step ceiling. */
     internal fun strength(choice: LearnedChoice?, now: Long): Int {
         if (choice == null || choice.count < 2) return 0
-        val age = (now - choice.lastUsed.coerceAtLeast(0)).coerceAtLeast(0)
-        val count = choice.count shr (age / HALF_LIFE).coerceAtMost(30).toInt()
-        return (31 - Integer.numberOfLeadingZeros(count)).coerceIn(0, 4)
+        return (31 - Integer.numberOfLeadingZeros(recentUses(choice, now))).coerceIn(0, 4)
     }
 
     internal fun rank(base: List<Candidate>, history: Map<String, LearnedChoice>, now: Long,

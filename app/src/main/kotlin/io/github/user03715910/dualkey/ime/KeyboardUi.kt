@@ -189,7 +189,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         }) }
         fun row(items: List<Pair<String,String>>) { keys.addView(LinearLayout(context).apply { orientation=LinearLayout.HORIZONTAL; isBaselineAligned=false; items.forEach { addView(button(it.first,it.second)) } }) }
         if (symbols) {
-            listOf("! @ # $ % ^ & * ( )", "- _ = + [ ] { } / \\", "、 。 ー 〜 ～ ・ 「 」 ？ ！").forEach { line -> row(line.split(' ').map { it to it }) }
+            listOf("! ? @ # $ % ^ & * ( )", "- _ = + [ ] { } / \\", "、 。 ー 〜 ～ ・ 「 」 ？ ！").forEach { line -> row(line.split(' ').map { it to it }) }
             row(listOf("戻る" to "symbols", "空白" to "space", "⌫" to "delete", "↵" to "enter"))
         } else if ((english && !settings.englishFlick) || (!english && settings.japaneseQwerty)) {
             listOf("qwertyuiop","asdfghjkl").forEach { line -> row(line.map { val s=if (shift>0) it.uppercase() else it.toString(); s to s }) }

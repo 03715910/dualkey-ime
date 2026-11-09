@@ -32,14 +32,15 @@ object Romaji {
         return null
     }
 
-    fun convert(raw: String, flush: Boolean = false): String = buildString {
+    fun convert(raw: String, flush: Boolean = false, preserveAsciiBangAndQuestion: Boolean = false): String = buildString {
         val s = raw.lowercase()
         var i = 0
         while (i < s.length) {
             val c = s[i]
             if (c !in 'a'..'z' && c !in "-,.[]/") {
                 // Japanese punctuation uses full-width forms; numbers stay half-width.
-                append(if (c in '!'..'~' && !c.isLetterOrDigit()) c + 0xfee0 else c)
+                val resolvedWidth = preserveAsciiBangAndQuestion && c in "!?"
+                append(if (!resolvedWidth && c in '!'..'~' && !c.isLetterOrDigit()) c + 0xfee0 else c)
                 i++; continue
             }
             val next = s.getOrNull(i + 1)
@@ -70,10 +71,10 @@ object Romaji {
     }
 }
 
-class Composer {
+class Composer(private val preserveAsciiBangAndQuestion: Boolean = false) {
     private val raw = StringBuilder()
-    val text get() = Romaji.convert(raw.toString())
-    val reading get() = Romaji.convert(raw.toString(), true)
+    val text get() = Romaji.convert(raw.toString(), preserveAsciiBangAndQuestion = preserveAsciiBangAndQuestion)
+    val reading get() = Romaji.convert(raw.toString(), flush = true, preserveAsciiBangAndQuestion = preserveAsciiBangAndQuestion)
     val isEmpty get() = raw.isEmpty()
     fun append(value: String) { raw.append(value) }
     fun delete(): Boolean {

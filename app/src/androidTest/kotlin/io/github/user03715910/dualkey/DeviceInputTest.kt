@@ -11,6 +11,7 @@ import android.os.ParcelFileDescriptor
 import android.text.InputType
 import android.view.*
 import android.view.accessibility.*
+import android.view.inputmethod.EditorInfo
 import android.view.inputmethod.InputMethodManager
 import android.widget.EditText
 import androidx.core.view.*
@@ -18,10 +19,15 @@ import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import io.github.dualkey.core.DisplayMode
 import io.github.dualkey.core.ToggleShortcut
+import io.github.user03715910.dualkey.data.LearningStore
 import io.github.user03715910.dualkey.data.Prefs
 import io.github.user03715910.dualkey.settings.MainActivity
 import io.github.user03715910.dualkey.ime.KeyboardVisibilityNotification
 import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.cancel
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.withTimeout
 import io.github.dualkey.core.DictionaryConversionEngine
@@ -716,6 +722,115 @@ class DeviceInputTest {
         key(KeyEvent.KEYCODE_ENTER); key(KeyEvent.KEYCODE_ZENKAKU_HANKAKU)
         key(KeyEvent.KEYCODE_SLASH,KeyEvent.META_SHIFT_ON); key(KeyEvent.KEYCODE_1,KeyEvent.META_SHIFT_ON)
         assertEquals("？！（）1?!",inputText())
+    }
+
+    private fun resetPunctuationEditor(text: String = "", type: Int = InputType.TYPE_CLASS_TEXT, options: Int = 0) {
+        main {
+            editor.id = View.generateViewId()
+            editor.inputType = type
+            editor.imeOptions = options
+            editor.setText(text)
+            editor.setSelection(text.length)
+            activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
+        }
+        await("new punctuation editor") { "fieldId=${editor.id}\n" in diagnostic().replace("\r\n", "\n") }
+    }
+
+    @Test fun punctuationFollowsTextForPhysicalAndScreenKeys() {
+        letters("KONNICHIWA")
+        clickLabel("こんにちは")
+        key(KeyEvent.KEYCODE_1, KeyEvent.META_SHIFT_ON)
+        assertEquals("こんにちは！", inputText())
+        key(KeyEvent.KEYCODE_ENTER)
+        key(KeyEvent.KEYCODE_EISU)
+        key(KeyEvent.KEYCODE_SLASH, KeyEvent.META_SHIFT_ON)
+        assertEquals("こんにちは！？", inputText())
+        key(KeyEvent.KEYCODE_SPACE)
+        letters("REALLY")
+        key(KeyEvent.KEYCODE_KANA)
+        key(KeyEvent.KEYCODE_SLASH, KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("こんにちは！？ really?", inputText())
+
+        resetPunctuationEditor("Hello日本語　")
+        touch(rect("記号"))
+        touch(rect("?"))
+        assertEquals("Hello日本語　？", inputText())
+        resetPunctuationEditor("日本語abc ")
+        touch(rect("記号"))
+        touch(rect("!"))
+        assertEquals("日本語abc !", inputText())
+    }
+
+    @Test fun protectedFieldsAndExplicitWidthChoicesStayLiteral() {
+        val textFields = listOf(InputType.TYPE_TEXT_VARIATION_URI, InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD)
+        for (variation in textFields) {
+            resetPunctuationEditor("日本語", InputType.TYPE_CLASS_TEXT or variation)
+            key(KeyEvent.KEYCODE_SLASH, KeyEvent.META_SHIFT_ON)
+            assertEquals("日本語?", inputText())
+        }
+        resetPunctuationEditor("日本語", options = EditorInfo.IME_FLAG_FORCE_ASCII)
+        key(KeyEvent.KEYCODE_1, KeyEvent.META_SHIFT_ON)
+        assertEquals("日本語!", inputText())
+
+        resetPunctuationEditor("本当")
+        letters("HATENA")
+        clickLabel("?")
+        assertEquals("本当?", inputText())
+        resetPunctuationEditor("Really")
+        letters("BIKKURI")
+        clickLabel("！")
+        assertEquals("Really！", inputText())
+    }
+
+    @Test fun selectedEllipsesPredictFromTheirStoredReadingAndSurviveReopening() {
+        val app = instrumentation.targetContext.applicationContext as DualKeyApp
+        val reading = "てんてんてん"
+        fun counts() = app.learning.state.value.entries.filter { it.reading == reading }.associate { it.text to it.count }
+        runBlocking {
+            app.learning.awaitLoaded()
+            app.settings.set(Prefs.learningEnabled, true)
+            app.settings.state.first { it.learningEnabled }
+        }
+        val original = counts()
+        try {
+            if (InstrumentationRegistry.getArguments().getString("restartedLearning") == "true") {
+                assertEquals(mapOf("⋯" to 7, "…" to 1), original)
+                letters("TEN")
+                await("restored short learned prefix visible") { findNode { it.text?.toString() == "⋯" } != null }
+                return
+            }
+            for (mark in List(6) { "⋯" } + "…") {
+                val count = counts()[mark] ?: 0
+                letters("TENTENTEN")
+                clickLabel(mark)
+                await("explicit symbol selection recorded") { counts()[mark] == count + 1 }
+            }
+            assertEquals("⋯⋯⋯⋯⋯⋯…", inputText())
+            assertEquals((original["⋯"] ?: 0) + 6, counts()["⋯"])
+            assertEquals((original["…"] ?: 0) + 1, counts()["…"])
+
+            val readerScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+            val reopened = LearningStore(app, readerScope) { true }
+            try {
+                runBlocking { withTimeout(10_000) { reopened.awaitLoaded() } }
+                assertEquals(counts(), reopened.state.value.entries.filter { it.reading == reading }.associate { it.text to it.count })
+            } finally { reopened.close(); readerScope.cancel() }
+
+            letters("TENTEN")
+            clickLabel("⋯")
+            await("partial selection credited to the original reading") { counts()["⋯"] == (original["⋯"] ?: 0) + 7 }
+            letters("TEN")
+            await("short learned prefix visible") { findNode { it.text?.toString() == "⋯" } != null }
+            resetPunctuationEditor(options = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING)
+            letters("TENTENTEN")
+            clickLabel("⋯")
+            letters("TEN")
+            await("ordinary private candidates visible") { findNode { it.text?.toString() == "点" } != null }
+            assertNull(findNode { it.text?.toString() == "⋯" })
+            assertEquals((original["⋯"] ?: 0) + 7, counts()["⋯"])
+        } finally { runBlocking { app.settings.set(Prefs.learningEnabled, false) } }
     }
     @Test fun zenkakuHankakuAndJisCompatibilityKeysToggleBothWays() {
         letters("KA"); key(KeyEvent.KEYCODE_ZENKAKU_HANKAKU); letters("KA"); assertEquals("かka",inputText())

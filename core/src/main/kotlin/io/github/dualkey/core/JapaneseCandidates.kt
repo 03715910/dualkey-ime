@@ -15,7 +15,7 @@ object JapaneseCandidates {
         expressions: ExpressionCandidates = ExpressionCandidates(), emoji: Boolean = true, face: Boolean = true,
         context: Candidate? = null, now: Long = System.currentTimeMillis(),
     ): CandidateLists {
-        val key = Personalization.normalize(reading)
+        val key = Personalization.normalizeComposition(reading)
         if (key.isEmpty()) return CandidateLists()
         val count = limit.coerceIn(2, 10000)
         val choices = history.asSequence().filter { it.reading.isNotEmpty() && key.contains(it.reading) }
@@ -46,8 +46,20 @@ object JapaneseCandidates {
         val raw = literals.map { candidate ->
             evidenceBySurface[candidate.text].orEmpty().fold(candidate) { result, alternative -> result.withAlternative(alternative) }
         }
-        val alias = SymbolCandidates.candidates(key, expressions.symbols, prediction, CandidateSource.SYMBOL_ALIAS)
-        val symbol = SymbolCandidates.candidates(key, symbols, prediction)
+        fun rankSymbols(base: List<Candidate>): List<Candidate> {
+            if (base.firstOrNull()?.reading != key || historyForKey.isEmpty()) return base
+            val ranked = Personalization.rank(base, historyForKey, now)
+            // The general rank has a capped boost. Keep the most-used explicit
+            // spelling first within the symbol group even if both hit that cap.
+            val preferred = ranked.mapNotNull { candidate ->
+                historyForKey[candidate.text]?.let { candidate to Personalization.recentUses(it, now) }
+            }.maxByOrNull { it.second }
+            return if (preferred != null && preferred.second >= 3)
+                listOf(preferred.first) + ranked.filter { it.text != preferred.first.text }
+            else ranked
+        }
+        val alias = rankSymbols(SymbolCandidates.candidates(key, expressions.symbols, prediction, CandidateSource.SYMBOL_ALIAS))
+        val symbol = rankSymbols(SymbolCandidates.candidates(key, symbols, prediction))
         val exactAlias = alias.filter { it.reading == key }
         // Keep a dictionary-backed hiragana or katakana spelling eligible for its
         // natural rank. Generated script variants also have reserved short-input slots.
@@ -66,7 +78,7 @@ object JapaneseCandidates {
         val showScriptsEarly = counters.isNotEmpty() || matched.isEmpty() && trusted.isEmpty()
         val direct = mergeCandidates(directHead + (if (showScriptsEarly && directHead.isEmpty()) raw.take(1) else emptyList()) +
             exactAlias.take(3) + (if (showScriptsEarly) raw else emptyList()) +
-            trusted + directWords + raw + alias.filter { it.reading == key } + symbol.filter { it.reading == key })
+            trusted + directWords + raw + exactAlias + symbol.filter { it.reading == key })
 
         val wholePrefixes = mergeCandidates(group(CandidateReason.USER_PREFIX) +
             group(CandidateReason.PREFIX).sortedWith(byCost))
@@ -82,6 +94,11 @@ object JapaneseCandidates {
             historyForKey, now)
         val head = if (prediction && phrasePrefixes.isNotEmpty())
             mergeCandidates(directHead.take(2) + phrasePrefixes.take(2) + direct.take(5)) else direct.take(5)
+        val leading = head.take(2)
+        val learnedPrefixes = if (prediction && key.length >= 2 && history.isNotEmpty()) {
+            learnedPrefixes(key, history, leading.map { it.text }.toSet(), contextualPrefixes,
+                engine, symbols, expressions, now)
+        } else emptyList()
 
         // Show a sample from secondary sources early, then continue through the full
         // ranked lists. A huge prefix result cannot exhaust the symbol or meaning slots.
@@ -93,7 +110,9 @@ object JapaneseCandidates {
         // screenful, so hundreds of exact kanji cannot bury valid completions.
         val followups = interleave(direct.drop(5), wholePrefixes, tails)
         val all = mergeCandidates(buildList {
-            addAll(head)
+            addAll(leading)
+            addAll(learnedPrefixes)
+            addAll(head.drop(2))
             addAll(fallback)
             addAll(contextualPrefixes.take(2))
             addAll(leadingPredictions)
@@ -112,7 +131,42 @@ object JapaneseCandidates {
             addAll(emotional.second)
             addAll(weak)
         })
-        return CandidateLists(all.take(count), direct.take(count), emotional.first, emotional.second)
+        val limited = all.take(count)
+        val ranked = if (learnedPrefixes.isEmpty()) limited else {
+            val learnedBySurface = learnedPrefixes.associateBy { it.text }
+            // The same symbol can have a shorter dictionary reading. The
+            // prediction credits its stored full reading; the exact tab keeps its own.
+            limited.map { candidate -> learnedBySurface[candidate.text]?.withAlternative(candidate) ?: candidate }
+        }
+        return CandidateLists(ranked, direct.take(count), emotional.first, emotional.second)
+    }
+
+    private fun learnedPrefixes(key: String, history: List<LearnedChoice>, reserved: Set<String>,
+        contextual: List<Candidate>, engine: ConversionEngine, symbols: Map<String, List<String>>,
+        expressions: ExpressionCandidates, now: Long,
+    ): List<Candidate> {
+        val inContext = contextual.map { it.reading to it.text }.toSet()
+        return history.asSequence().filter { it.reading.startsWith(key) && it.text !in reserved }
+            .map { it to Personalization.recentUses(it, now) }
+            .filter { (choice, uses) ->
+                val added = choice.reading.length - key.length
+                // A short prefix has more homophones and needs stronger evidence.
+                added in 1..4 && uses >= if (key.length == 2 || added > 2) 6 else 3
+            }
+            .sortedWith(compareBy<Pair<LearnedChoice, Int>> { it.first.reading.length }
+                .thenByDescending { (it.first.reading to it.first.text) in inContext }
+                .thenByDescending { it.second }.thenByDescending { it.first.lastUsed })
+            .take(12)
+            .mapNotNull { (choice) ->
+                val (reading, text) = choice
+                val isSymbol = text in expressions.symbols[reading].orEmpty() || text in symbols[reading].orEmpty()
+                val known = isSymbol || text in expressions.words[reading].orEmpty() ||
+                    (engine as? DictionaryConversionEngine)?.knownChoice(reading, text) == true ||
+                    PhrasePrediction.candidates(reading, false).any { it.text == text }
+                if (!known) return@mapNotNull null
+                Candidate(text, reading, if (isSymbol) CandidateKind.SYMBOL else CandidateKind.WORD,
+                    CandidateEvidence(CandidateReason.LEARNED, CandidateSource.HISTORY, reading, key.length, choice = choice))
+            }.distinctBy { it.text }.take(2).toList()
     }
 
     fun next(context: Candidate, history: List<LearnedContinuation>, engine: ConversionEngine, semantic: JapaneseLexicon?,

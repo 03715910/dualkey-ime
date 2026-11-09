@@ -37,9 +37,9 @@ data class Candidate(
     val alternatives: List<CandidateEvidence> = emptyList(),
 ) {
     fun directlyMatches(input: String): Boolean =
-        Personalization.normalize(input).lowercase().let { key ->
+        Personalization.normalizeComposition(input).lowercase().let { key ->
             if (evidence == null) (kind == CandidateKind.WORD || kind == CandidateKind.SYMBOL) &&
-                Personalization.normalize(reading).lowercase() == key
+                Personalization.normalizeComposition(reading).lowercase() == key
             else (evidence.reason.direct && evidence.reading == key) || alternatives.any { it.reason.direct && it.reading == key }
         }
 

@@ -27,7 +27,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val app get() = application as DualKeyApp
     private val settings get() = app.settings.state.value
-    private val composer = Composer()
+    private val composer = Composer(preserveAsciiBangAndQuestion = true)
     private val visibility = VisibilityController()
     private val conversion get() = app.japaneseDictionary.engine.value
     private data class CandidateQuery(val reading: String, val prediction: Boolean, val limit: Int,
@@ -69,6 +69,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var lastShift = 0L
     private var symbols = false
     private var sensitive = false
+    private var asciiPunctuation = false
     private var predictionsAllowed = true
     private var japaneseConversionAllowed = false
     private var learningAllowed = false
@@ -321,18 +322,19 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             InputType.TYPE_TEXT_VARIATION_VISIBLE_PASSWORD, InputType.TYPE_TEXT_VARIATION_WEB_PASSWORD)) ||
             (klass == InputType.TYPE_CLASS_NUMBER && variation == InputType.TYPE_NUMBER_VARIATION_PASSWORD)
         numeric = klass == InputType.TYPE_CLASS_NUMBER || klass == InputType.TYPE_CLASS_PHONE || klass == InputType.TYPE_CLASS_DATETIME
+        val addressField = klass == InputType.TYPE_CLASS_TEXT && variation in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,
+            InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_URI)
+        val asciiRequested = attribute.imeOptions and EditorInfo.IME_FLAG_FORCE_ASCII != 0
+        val privateMode = attribute.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0
+        asciiPunctuation = sensitive || numeric || addressField || asciiRequested || privateMode
         // Editors may provide their own completions. Kana-to-kanji conversion still
         // needs local candidates to turn the composing reading into Japanese text.
         japaneseConversionAllowed = inputStarted && !sensitive && klass == InputType.TYPE_CLASS_TEXT
         predictionsAllowed = japaneseConversionAllowed && type and InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS == 0
-        learningAllowed = predictionsAllowed && klass==InputType.TYPE_CLASS_TEXT &&
-            attribute.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING==0 &&
-            variation !in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI)
-        contextAllowed=predictionsAllowed && klass==InputType.TYPE_CLASS_TEXT &&
-            variation !in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI)
+        learningAllowed = predictionsAllowed && !asciiPunctuation
+        contextAllowed = predictionsAllowed && !addressField
         if (!preserve) {
-            english = settings.initialEnglish || sensitive || numeric || (klass == InputType.TYPE_CLASS_TEXT &&
-                variation in setOf(InputType.TYPE_TEXT_VARIATION_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS,InputType.TYPE_TEXT_VARIATION_URI))
+            english = settings.initialEnglish || sensitive || numeric || addressField
             shift=0; symbols=false
         }
         detectHardware(); rebuild(); refreshCandidates()
@@ -634,11 +636,12 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             val expressions=app.expressions.entries.value
             scope.launch(Dispatchers.Default) {
                 fun units(word: Candidate): List<Candidate> {
+                    val reading = Personalization.normalize(word.reading)
+                    if (word.text in symbolEntries[reading].orEmpty() || word.text in expressions.symbols[reading].orEmpty())
+                        return listOf(word)
                     val parts=engine?.learningUnits(word.reading,word.text).orEmpty()
                     if (parts.isNotEmpty()) return parts
-                    return if (word.text in symbolEntries[Personalization.normalize(word.reading)].orEmpty() ||
-                        word.text in expressions.symbols[Personalization.normalize(word.reading)].orEmpty() ||
-                        word.text in expressions.words[Personalization.normalize(word.reading)].orEmpty() ||
+                    return if (word.text in expressions.words[reading].orEmpty() ||
                         word.evidence?.reason in setOf(CandidateReason.EXPRESSION_EXACT, CandidateReason.EXPRESSION_MEANING) ||
                         word.text in SemanticConversion.equivalents(semantic,word.reading,word.reading) ||
                         PhrasePrediction.candidates(word.reading,false).any { it.text == word.text }) listOf(word) else emptyList()
@@ -697,8 +700,18 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         }
         resetConversion(); refreshCandidates()
     }
-    private fun type(value: String) {
+    private fun type(key: String) {
         if (!hasEditor()) return
+        val value = if (key == "!" || key == "?") {
+            val composing = when {
+                english -> englishWord
+                converting || variant != null -> displayedComposition()
+                else -> composer.reading
+            }
+            SentencePunctuation.resolve(key, composing, !english, asciiPunctuation) {
+                runCatching { currentInputConnection?.getTextBeforeCursor(SentencePunctuation.CONTEXT_LENGTH, 0) }.getOrNull()
+            }
+        } else key
         hardwareCandidates=false
         invalidateTranslation()
         if (sensitive || numeric) { currentInputConnection?.commitText(value,1); return }
@@ -708,7 +721,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 if (compositionRestoreJob?.isActive!=true) currentInputConnection?.setComposingText(englishWord,1)
             } else { finishEnglish(); currentInputConnection?.commitText(value,1) }
         } else {
-            if (converting || variant!=null) commitComposition(true)
+            if (converting || variant!=null) commitComposition()
             committedTail?.let { if (composer.isEmpty && !validTail(it)) committedTail=null }
             composer.append(value); resetConversion()
             if (compositionRestoreJob?.isActive!=true) currentInputConnection?.setComposingText(composer.text,1)
