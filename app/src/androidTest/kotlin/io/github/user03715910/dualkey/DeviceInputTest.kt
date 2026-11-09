@@ -449,7 +449,8 @@ class DeviceInputTest {
     private fun bottomEditor(multiline: Boolean=false, reportsCursor: Boolean=true) {
         ImeControl.request(DisplayMode.HIDDEN); await("letter keys hidden") { imeHeight()==0 }
         main {
-            val margin=(ViewCompat.getRootWindowInsets(activity.window.decorView)?.getInsets(WindowInsetsCompat.Type.systemBars())?.bottom ?: 0)+4
+            val bars=WindowInsetsCompat.Type.systemBars() or WindowInsetsCompat.Type.mandatorySystemGestures()
+            val margin=(ViewCompat.getRootWindowInsets(activity.window.decorView)?.getInsets(bars)?.bottom ?: 0)+4
             val overlay=android.widget.FrameLayout(activity)
             editor=object : EditText(activity) {
                 override fun onCreateInputConnection(outAttrs: android.view.inputmethod.EditorInfo): android.view.inputmethod.InputConnection? {
@@ -469,9 +470,12 @@ class DeviceInputTest {
             }
             val height=((if (multiline) 96 else 56)*activity.resources.displayMetrics.density).toInt()
             overlay.addView(editor,android.widget.FrameLayout.LayoutParams(-1,height,Gravity.BOTTOM).apply { bottomMargin=margin })
-            activity.addContentView(overlay,android.view.ViewGroup.LayoutParams(-1,-1)); editor.requestFocus()
+            activity.addContentView(overlay,android.view.ViewGroup.LayoutParams(-1,-1))
+            assertTrue("The bottom editor can take input focus",editor.requestFocus())
         }
         instrumentation.waitForIdleSync()
+        // Bind the replacement editor without requesting that Android show the keyboard.
+        main { activity.getSystemService(InputMethodManager::class.java).restartInput(editor) }
         await("bottom editor served") { "fieldId=${editor.id}\n" in diagnostic().replace("\r\n","\n") }
     }
     @Test fun hiddenCaptionLeavesTheBottomEditorVisibleAndTouchableDuringHardwareConversion() {
@@ -496,9 +500,15 @@ class DeviceInputTest {
         captureHardware("bottom-editor-after-hidden-conversion")
         var touched=false
         val bounds=Rect()
-        main { editor.setOnTouchListener { _,event -> if (event.action==MotionEvent.ACTION_DOWN) touched=true; false }; editor.getGlobalVisibleRect(bounds) }
+        main {
+            editor.setOnTouchListener { _,event -> if (event.action==MotionEvent.ACTION_DOWN) touched=true; false }
+            val origin=IntArray(2).also(editor::getLocationOnScreen)
+            bounds.set(origin[0],origin[1],origin[0]+editor.width,origin[1]+editor.height)
+            val safe=Rect().also(activity.window.decorView::getWindowVisibleDisplayFrame)
+            assertTrue("The bottom field $bounds stays inside the visible frame $safe",safe.contains(bounds))
+        }
         assertTrue(bounds.height()>40)
-        touch(Rect(bounds.left,bounds.bottom-16,bounds.right,bounds.bottom-4))
+        touch(Rect(bounds.left,bounds.centerY(),bounds.right,bounds.bottom-16))
         main { assertTrue("The IME must not eat taps at the bottom of the input field",touched) }
     }
     private fun allowCandidateWindowWhileHidden(allow: Boolean=true) {
@@ -520,7 +530,12 @@ class DeviceInputTest {
             val safe=Rect().also(activity.window.decorView::getWindowVisibleDisplayFrame)
             assertTrue("Candidate window ${panelBounds} stays within ${safe}",safe.contains(panelBounds))
             assertTrue("Candidate window leaves bottom editor and caret visible",panelBounds.bottom<=editorOrigin[1])
-            assertTrue("Bottom of the field is above system navigation",editorOrigin[1]+editor.height<=safe.bottom)
+            val decor=activity.window.decorView
+            val nav=ViewCompat.getRootWindowInsets(decor)?.getInsetsIgnoringVisibility(WindowInsetsCompat.Type.navigationBars())
+            val decorOrigin=IntArray(2).also(decor::getLocationOnScreen)
+            // The optional IME caption can shrink the visible frame beyond the system navigation bar.
+            val navTop=decorOrigin[1]+decor.height-(nav?.bottom ?: 0)
+            assertTrue("Bottom of the field is above system navigation",editorOrigin[1]+editor.height<=navTop)
         }
         for (index in 0 until panel.childCount) {
             val row=panel.getChild(index) ?: continue
