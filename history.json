@@ -1,6 +1,21 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 25,
+    "versionName": "0.1.22",
+    "releaseDate": "2026-11-09",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.22/DualKeyIME-0.1.22.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "72005e9f9088df6d136f242b6552d4ceaf17e89cf0f234eca83123ae12a09e8d",
+    "sizeBytes": 101769587,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "コトダマン辞書など、入力欄の種類を省略しているアプリでも画面キーボードを開き、日本語を入力できるようにしました。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 24,
     "versionName": "0.1.21",
     "releaseDate": "2026-11-09",
