@@ -1245,6 +1245,21 @@ class DeviceInputTest {
         key(KeyEvent.KEYCODE_ENTER)
         assertEquals("天気",inputText())
     }
+    @Test fun searchEditorWithOnlyCapitalizationFlagAcceptsJapanese() {
+        val fieldId=View.generateViewId()
+        main {
+            // Kotodaman Dictionary changes its input type to this flag alone when focused.
+            editor.id=fieldId
+            editor.inputType=InputType.TYPE_TEXT_FLAG_CAP_SENTENCES
+            activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
+        }
+        await("flag-only search editor is active") {
+            val state=diagnostic()
+            "fieldId=$fieldId\n" in state.replace("\r\n","\n") && "editor=true" in state && imeHeight()>0
+        }
+        touch(rect("あ行")); touch(rect("か行")); touch(rect("↵"))
+        assertEquals("あか",inputText())
+    }
     @Test fun passwordDisablesSuggestionsAndTranslation() {
         main { editor.inputType=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_VARIATION_PASSWORD; editor.setText(""); activity.getSystemService(InputMethodManager::class.java).restartInput(editor) }
         await("password input mode ready") { "sensitive=true" in diagnostic() && findNode { it.contentDescription?.toString()=="日本語に切り替え" }!=null && findNode { it.text?.toString()=="翻訳" }==null }

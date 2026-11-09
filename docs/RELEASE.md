@@ -17,6 +17,8 @@ python tools/create_signing_key.py
 
 専用リポジトリは`03715910/dualkey-ime`、配布サイトは`https://03715910.github.io/dualkey-ime/`です。既存アプリのリポジトリやサイトは変更しません。署名鍵・パスワードをGitHubへ登録せず、PC内で署名します。`distribution.properties`にはURLと公開証明書のSHA-256だけを保存します。
 
+利用者に修正を届けるときは、署名済みAPKと配布サイトを公開し、アプリ内の更新確認で使う公開フィードから新版を取得できることまで確認します。
+
 更新するときは次の順番です。
 
 1. `version.properties`のversionCodeとversionNameを増やし、`release-notes.txt`を更新します。

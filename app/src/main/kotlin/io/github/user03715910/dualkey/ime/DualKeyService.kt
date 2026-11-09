@@ -257,8 +257,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         val active=hasEditor()
         ImeControl.state.value=ImeControl.UiState(active,active && windowShown && isInputViewShown && visibility.mode!=DisplayMode.HIDDEN,visibility.mode)
     }
-    private fun hasEditor() = inputStarted && currentInputConnection!=null &&
-        (currentInputEditorInfo?.inputType ?: InputType.TYPE_NULL) and InputType.TYPE_MASK_CLASS != InputType.TYPE_NULL
+    private fun hasEditor() = inputStarted && currentInputConnection!=null
     private fun applyDisplayRequest(request: ImeControl.DisplayRequest) {
         if (request.notification && !app.settings.state.value.visibilityNotification) {
             ImeControl.requests.compareAndSet(request,null)
@@ -285,7 +284,13 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
         stopScreenshot()
         hardwarePanel.clearCursor()
-        val key=EditorKey(attribute.packageName,attribute.fieldId,attribute.inputType,attribute.imeOptions)
+        val reportedType=attribute.inputType
+        // Some text editors send flags alone, omitting TYPE_CLASS_TEXT. A true TYPE_NULL
+        // and classless variations stay inactive because they do not identify a rich text field.
+        val type=if (reportedType!=InputType.TYPE_NULL && (reportedType and InputType.TYPE_MASK_FLAGS)==reportedType) {
+            reportedType or InputType.TYPE_CLASS_TEXT
+        } else reportedType
+        val key=EditorKey(attribute.packageName,attribute.fieldId,reportedType,attribute.imeOptions)
         val owned=if (english) englishWord else displayedComposition()
         val same=restarting && inputStarted && editorKey==key
         val rotation=rotationComposition?.takeIf { same && it.editor==key && it.expires>=SystemClock.uptimeMillis() }
@@ -301,7 +306,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         displayEpoch++; displayRetry?.cancel()
         super.onStartInput(attribute,restarting)
         clearClipboardPreview()
-        session++; inputStarted=attribute.inputType and InputType.TYPE_MASK_CLASS != InputType.TYPE_NULL
+        session++; inputStarted=type and InputType.TYPE_MASK_CLASS != InputType.TYPE_NULL
         editorKey=if (inputStarted) key else null
         if (!preserve) clearState() else invalidateTranslation()
         if (preserve && !changingConfiguration && (owned.isNotEmpty() || rotation!=null)) {
@@ -310,7 +315,6 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         }
         editorRequested=inputStarted && wanted
         ImeControl.inputActive=hasEditor()
-        val type = attribute.inputType
         val klass = type and InputType.TYPE_MASK_CLASS
         val variation = type and InputType.TYPE_MASK_VARIATION
         sensitive = (klass == InputType.TYPE_CLASS_TEXT && variation in setOf(InputType.TYPE_TEXT_VARIATION_PASSWORD,
