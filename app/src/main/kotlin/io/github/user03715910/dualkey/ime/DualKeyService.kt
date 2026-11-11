@@ -76,7 +76,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var english = false
     private var shift = 0
     private var lastShift = 0L
-    private var symbols = false
+    private var symbolPage: SymbolPage? = null
     private var sensitive = false
     private var asciiPunctuation = false
     private var predictionsAllowed = true
@@ -359,7 +359,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         contextAllowed = predictionsAllowed && !addressField
         if (!preserve) {
             english = settings.initialEnglish || sensitive || numeric || addressField
-            shift=0; symbols=false
+            shift=0; symbolPage=null
         }
         detectHardware(); rebuild(); refreshCandidates()
         val initialRequest=if (hasEditor()) ImeControl.requests.value else null
@@ -493,14 +493,14 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     }
     @Suppress("DEPRECATION")
     private fun showLegacy() { window?.window?.attributes?.token?.let { getSystemService(InputMethodManager::class.java).showSoftInputFromInputMethod(it,0) } }
-    private fun rebuild() { ui?.rebuild(settings,english,shift,visibility.mode,symbols,sensitive) }
+    private fun rebuild() { ui?.rebuild(settings,english,shift,visibility.mode,symbolPage,sensitive) }
     private fun feedback(view: View) {
         if (settings.vibration) view.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_VIEW_SETTING)
         if (settings.sound) getSystemService(AudioManager::class.java).playSoundEffect(AudioManager.FX_KEY_CLICK,0.3f)
     }
-    private fun invalidateTranslation() {
+    private fun invalidateTranslation(keepSymbols: Boolean=false) {
         clipboardShowing=false
-        revision++; translationJob?.cancel(); translationJob=null; variantJob?.cancel(); variantJob=null; ui?.hideTranslation()
+        revision++; translationJob?.cancel(); translationJob=null; variantJob?.cancel(); variantJob=null; ui?.hideTranslation(keepSymbols)
     }
     private fun resetVariant() { variantJob?.cancel(); variantJob=null; variant=null }
     private fun clearState() {
@@ -1317,6 +1317,22 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             sendDownUpKeyEvents(if (step<0) KeyEvent.KEYCODE_DPAD_LEFT else KeyEvent.KEYCODE_DPAD_RIGHT)
         }
     }
+
+    private fun insertSymbol(symbol: String, keepCatalog: Boolean=false) {
+        val connection=currentInputConnection ?: return
+        invalidateTranslation(keepSymbols=keepCatalog)
+        connection.beginBatchEdit()
+        try {
+            if (!composer.isEmpty) commitComposition()
+            if (englishWord.isNotEmpty()) finishEnglish()
+            committedTail=null
+            connection.commitText(symbol,1)
+        } finally {
+            connection.endBatchEdit()
+        }
+        refreshCandidates()
+    }
+
     private fun onScreenKey(key: String) {
         if (!hasEditor() && key !in setOf("full","compact","hide","settings")) return
         if (key=="more_candidates") { moreCandidates(); return }
@@ -1326,6 +1342,13 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             "expand_candidates" -> moreCandidates(true)
             "paste" -> pasteClipboard()
             "clipboard_history" -> { app.clipboard.prune(); refreshClipboardPreview(); refreshScreenshot(); clipboardHistory() }
+            "symbol_catalog" -> {
+                invalidateTranslation(keepSymbols=true)
+                val editorSession=session
+                ui?.toggleSymbolCatalog { symbol ->
+                    if (session==editorSession && hasEditor()) insertSymbol(symbol,keepCatalog=true)
+                }
+            }
             "cycle_script" -> cycleScript()
             "mode" -> switchMode()
             "full" -> chooseDisplay(DisplayMode.FULL)
@@ -1334,7 +1357,18 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             "settings" -> startActivity(Intent(this, MainActivity::class.java).putExtra("settings",true)
                 .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP))
             "translate" -> translationMenu()
-            "symbols" -> { symbols=!symbols; rebuild() }
+            "symbols" -> {
+                symbolPage=if (symbolPage==null) SymbolPage.NUMBERS else null
+                rebuild()
+            }
+            "symbol_page" -> {
+                symbolPage=when (symbolPage) {
+                    SymbolPage.NUMBERS -> SymbolPage.EXTRA
+                    SymbolPage.EXTRA -> SymbolPage.NUMBERS
+                    null -> return
+                }
+                rebuild()
+            }
             "space" -> space()
             "enter" -> enter()
             "delete" -> delete()
@@ -1348,7 +1382,16 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 shift=ScreenShift.tap(shift,if (lastShift>0) now-lastShift else Long.MAX_VALUE,ViewConfiguration.getDoubleTapTimeout().toLong())
                 lastShift=now; rebuild()
             }
-            else -> { type(key); val next=ScreenShift.afterInput(shift,key); if (next!=shift) { shift=next; lastShift=0; rebuild() } }
+            else -> {
+                // Exclamation and question marks still follow the language around the cursor.
+                if (symbolPage!=null && key!="!" && key!="?") {
+                    insertSymbol(key)
+                    return
+                }
+                type(key)
+                val next=ScreenShift.afterInput(shift,key)
+                if (next!=shift) { shift=next; lastShift=0; rebuild() }
+            }
         }
     }
     private fun stepHardwareCandidate(step: Int) {

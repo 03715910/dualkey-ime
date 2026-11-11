@@ -19,10 +19,13 @@ import io.github.dualkey.core.CandidateLists
 import io.github.user03715910.dualkey.R
 import io.github.user03715910.dualkey.data.Settings
 
+internal enum class SymbolPage { NUMBERS, EXTRA }
+
 class KeyboardUi(private val context: Context, private val callback: (String) -> Unit,
     private val feedback: (View) -> Unit) {
     val root = LayoutInflater.from(context).inflate(R.layout.ime_root, null) as LinearLayout
     private val toolbar = root.findViewById<LinearLayout>(R.id.toolbar)
+    private var symbolCatalogButton: TextView? = null
     private val candidateStrip = root.findViewById<LinearLayout>(R.id.candidate_strip)
     private val candidateExpand = root.findViewById<TextView>(R.id.candidate_expand)
     private val compositionAttribution = root.findViewById<ImageView>(R.id.composition_attribution)
@@ -60,8 +63,15 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     private var showNumbers=false
     private var showKeys=false
     private var haptics=true
+    private fun symbolCatalogShown() = translationPanel.getChildAt(0) is SymbolCatalog
+
     private fun updateBody() {
         val translating=translationPanel.visibility==View.VISIBLE
+        val catalogShown=symbolCatalogShown()
+        symbolCatalogButton?.apply {
+            text=if (catalogShown) "閉じる" else "記号一覧"
+            contentDescription=if (catalogShown) "記号一覧を閉じる" else "記号一覧を開く"
+        }
         numberRow.visibility=if (showNumbers && !translating && !candidateExpanded) View.VISIBLE else View.GONE
         keys.visibility=if (showKeys && !translating && !candidateExpanded) View.VISIBLE else View.GONE
         expandedScroll.visibility=if (candidateExpanded && !translating) View.VISIBLE else View.GONE
@@ -72,8 +82,9 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         screenshotPreview.visibility=if (showScreenshot) View.VISIBLE else View.GONE
         clipboardPreview.visibility=if (showClipboard) View.VISIBLE else View.GONE
         val showPreview=showScreenshot || showClipboard
-        candidateScroll.visibility=if (showPreview) View.INVISIBLE else View.VISIBLE
-        candidateExpand.visibility=if (!showPreview && googleText==null && (previousCandidates.isNotEmpty() || candidateExpanded)) View.VISIBLE else View.GONE
+        candidateScroll.visibility=if (showPreview || catalogShown) View.INVISIBLE else View.VISIBLE
+        candidateExpand.visibility=if (!catalogShown && !showPreview && googleText==null &&
+            (previousCandidates.isNotEmpty() || candidateExpanded)) View.VISIBLE else View.GONE
         candidateExpand.text=if (candidateExpanded) "閉じる" else "一覧"
         candidateExpand.contentDescription=if (candidateExpanded) "変換候補の一覧を閉じる" else "変換候補を一覧表示"
         if (googleText!=null) {
@@ -151,7 +162,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             callback(if (action=="delete") "delete_chunk" else "clipboard_history"); true
         }
     }
-    fun rebuild(settings: Settings, english: Boolean, shift: Int, mode: DisplayMode, symbols: Boolean, sensitive: Boolean) {
+    internal fun rebuild(settings: Settings, english: Boolean, shift: Int, mode: DisplayMode, symbolPage: SymbolPage?, sensitive: Boolean) {
         candidateExpanded=false
         haptics=settings.vibration
         englishMode=english
@@ -160,7 +171,8 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         val landscape=screen.orientation==Configuration.ORIENTATION_LANDSCAPE
         val budget=screen.screenHeightDp*(if (landscape) .65f else .42f)
         val desiredNumber=(30*settings.heightPercent/100).coerceIn(22,42)
-        val fixedHeight=36+32+8+16+(if (settings.numberRow) desiredNumber+4 else 0)
+        val hasNumberStrip=settings.numberRow && symbolPage==null
+        val fixedHeight=36+32+8+16+(if (hasNumberStrip) desiredNumber+4 else 0)
         val maxRow=((budget-fixedHeight)/4).toInt().coerceAtLeast(24)
         keyHeight = (settings.keyHeight * settings.heightPercent / 100).coerceIn(24,maxRow)
         numberHeight=desiredNumber.coerceAtMost((keyHeight-4).coerceAtLeast(18))
@@ -169,14 +181,14 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             text=if (english) "EN" else "日本語"; textSize=12f; setTextColor(ink); gravity=Gravity.CENTER; isFocusable=false
             contentDescription="入力モード：$text"; layoutParams=LinearLayout.LayoutParams(dp(44),dp(32))
         })
-        toolbar.addView(button("履歴","clipboard_history",true,description="クリップボード履歴"))
+        symbolCatalogButton=button("記号一覧","symbol_catalog",true).also(toolbar::addView)
         toolbar.addView(button("貼り付け", "paste", true,description="貼り付け。長押しで履歴"))
         toolbar.addView(button(if (mode == DisplayMode.COMPACT) "全表示" else "縮小", if (mode == DisplayMode.COMPACT) "full" else "compact", true,
             description=if (mode == DisplayMode.COMPACT) "画面キーボードを全表示" else "省スペース表示"))
         if (!sensitive) toolbar.addView(button("翻訳", "translate", true))
         toolbar.addView(button("⚙", "settings", true, description="設定"))
         numberRow.removeAllViews(); keys.removeAllViews()
-        showNumbers=mode==DisplayMode.FULL && settings.numberRow
+        showNumbers=mode==DisplayMode.FULL && hasNumberStrip
         showKeys=mode==DisplayMode.FULL
         if (previousCandidates.isEmpty()) renderEmptyCandidates()
         updateBody()
@@ -185,9 +197,8 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             layoutParams.height=dp(numberHeight); setAutoSizeTextTypeUniformWithConfiguration(12,17,1,TypedValue.COMPLEX_UNIT_SP)
         }) }
         fun row(items: List<Pair<String,String>>) { keys.addView(LinearLayout(context).apply { orientation=LinearLayout.HORIZONTAL; isBaselineAligned=false; items.forEach { addView(button(it.first,it.second)) } }) }
-        if (symbols) {
-            listOf("! ? @ # $ % ^ & * ( )", "- _ = + [ ] { } / \\", "、 。 ー 〜 ～ ・ 「 」 ？ ！").forEach { line -> row(line.split(' ').map { it to it }) }
-            row(listOf("戻る" to "symbols", "空白" to "space", "⌫" to "delete", "↵" to "enter"))
+        if (symbolPage!=null) {
+            buildSymbolKeys(symbolPage)
         } else if ((english && !settings.englishFlick) || (!english && settings.japaneseQwerty)) {
             listOf("qwertyuiop","asdfghjkl").forEach { line -> row(line.map { val s=if (shift>0) it.uppercase() else it.toString(); s to s }) }
             val label=when (shift) { 2 -> "⇪"; 1 -> "⬆"; else -> "⇧" }
@@ -243,6 +254,50 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             })
         }
     }
+
+    private fun buildSymbolKeys(page: SymbolPage) {
+        val rows = when (page) {
+            SymbolPage.NUMBERS -> listOf(
+                "1 2 3 4 5 6 7 8 9 0",
+                "@ # ¥ $ € % & _ - +",
+                "#+= \" * ' : / ! ? = ⌫",
+                "戻る , 空白 . ; ( ) ↵",
+            )
+            SymbolPage.EXTRA -> listOf(
+                "☆ ♪ → ○ × ÷ < > ^ |",
+                "「 」 『 』 [ ] { } \\ ~",
+                "123 〒 々 〆 ゜ ・ ー ～ 〜 ⌫",
+                "戻る 、 空白 。 … ： ！ ？ ↵",
+            )
+        }
+        for (row in rows) keys.addView(LinearLayout(context).apply {
+            isBaselineAligned=false
+            for (label in row.split(' ')) {
+                val action = when (label) {
+                    "#+=", "123" -> "symbol_page"
+                    "戻る" -> "symbols"
+                    "空白" -> "space"
+                    "⌫" -> "delete"
+                    "↵" -> "enter"
+                    else -> label
+                }
+                val description = when (label) {
+                    "#+=" -> "記号の2ページ目を表示"
+                    "123" -> "記号の1ページ目を表示"
+                    "戻る" -> "文字入力に戻る"
+                    "⌫" -> "削除"
+                    "↵" -> "確定・改行"
+                    else -> label
+                }
+                addView(button(label,action,function=label!=action,description=description).apply {
+                    if (action=="space") {
+                        (layoutParams as LinearLayout.LayoutParams).weight=if (page==SymbolPage.NUMBERS) 3f else 2f
+                    }
+                })
+            }
+        })
+    }
+
     fun candidates(lists: CandidateLists, selected: Int, select: (Candidate) -> Unit, canLoadMore: Boolean=false, loading: Boolean=false, reading: String = "") {
         val values=lists.all.map { it.text }
         val changed=values.take(3)!=previousCandidates.take(3)
@@ -334,7 +389,22 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             addView(Button(context).apply { text=label; isFocusable=false; layoutParams=LinearLayout.LayoutParams(0,dp(48),1f); setOnClickListener { action() } })
         } })
     }
-    fun hideTranslation() { translationPanel.visibility=View.GONE; translationPanel.removeAllViews(); updateBody() }
+    fun toggleSymbolCatalog(insert: (String)->Unit) {
+        if (symbolCatalogShown()) { hideTranslation(); return }
+        val keypadHeight=4*(keyHeight+4)+(if (showNumbers) numberHeight+4 else 0)
+        translationPanel.removeAllViews()
+        translationPanel.addView(SymbolCatalog(context,(keypadHeight-36).coerceAtLeast(76),
+            ink,keyColor,functionColor,feedback,insert))
+        translationPanel.visibility=View.VISIBLE
+        candidateExpanded=false
+        updateBody()
+    }
+    fun hideTranslation(keepSymbols: Boolean=false) {
+        if (keepSymbols && symbolCatalogShown()) return
+        translationPanel.visibility=View.GONE
+        translationPanel.removeAllViews()
+        updateBody()
+    }
     fun showClipboardPreview(bitmap: android.graphics.Bitmap?,label: String?,paste: ()->Unit = {},dismiss: ()->Unit = {},screenshot: Boolean=false) {
         val clipboardPreview=if (screenshot) screenshotPreview else this.clipboardPreview
         clipboardPreview.removeAllViews()

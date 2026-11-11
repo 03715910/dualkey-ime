@@ -141,8 +141,47 @@ class DeviceInputTest {
         assertNotNull(gridCandidate { it.substringAfter('：')=="～" })
     }
     @Test fun symbolPanelProvidesTwoDistinctUnicodeWaves() {
-        touch(rect("記号")); touch(rect("～")); touch(rect("↵"))
-        touch(rect("〜")); touch(rect("↵")); assertEquals("～〜",inputText())
+        touch(rect("記号")); touch(rect("#+="))
+        touch(rect("～")); touch(rect("〜"))
+        assertEquals("～〜",inputText())
+    }
+
+    @Test fun symbolPagesSwitchAndInsertTheDisplayedGlyphsInEitherLanguage() {
+        touch(rect("か行"))
+        touch(rect("記号"))
+        for (symbol in listOf(":", "@", ".", "-", "/", "¥", "#", "\"")) touch(rect(symbol))
+        assertEquals("か:@.-/¥#\"",inputText())
+
+        val nextPage=rect("#+=")
+        touch(nextPage)
+        assertEquals(nextPage,rect("123"))
+        for (symbol in listOf("☆", "♪", "→", "〒", "々", "〆", "\\", "：")) touch(rect(symbol))
+        assertEquals("か:@.-/¥#\"☆♪→〒々〆\\：",inputText())
+
+        touch(rect("123")); touch(rect("1")); touch(rect("⌫")); touch(rect("戻る"))
+        touch(rect("英語に切り替え")); touch(rect("a"))
+        touch(rect("記号")); touch(rect(":")); touch(rect("空白"))
+        assertEquals("か:@.-/¥#\"☆♪→〒々〆\\：a: ",inputText())
+    }
+
+    @Test fun symbolCatalogInsertsAcrossCategoriesAndPasteStillOpensClipboardHistory() {
+        touch(rect("記号一覧を開く"))
+        touch(rect("数学")); touch(rect("記号：∞"))
+        touch(rect("矢印"))
+        assertTrue(findNode { it.contentDescription=="記号の一覧" }?.isScrollable==true)
+        touch(rect("記号：←"))
+        touch(rect("丸数字")); touch(rect("記号：①"))
+        assertEquals("∞←①",inputText())
+
+        touch(rect("記号一覧を閉じる"))
+        touch(rect("あ行"))
+        assertEquals("∞←①あ",inputText())
+        touch(rect("記号一覧を開く"))
+        hold(rect("貼り付け"))
+        await("clipboard history via Paste long press") {
+            findNode { it.text?.toString()?.startsWith("履歴保存はOFF")==true }!=null
+        }
+        assertNull(findNode { it.contentDescription=="記号の一覧" })
     }
     @Test fun japaneseQwertyAndEnglishFlickUseIndependentSavedLayouts() {
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
@@ -374,9 +413,13 @@ class DeviceInputTest {
         }
         return instrumentation.uiAutomation.windows.filter { it.type==AccessibilityWindowInfo.TYPE_INPUT_METHOD }.firstNotNullOfOrNull { search(it.root) }
     }
+    private fun findLabel(label: String): AccessibilityNodeInfo? =
+        findNode { it.text?.toString()==label || it.contentDescription?.toString()==label }
+            ?: findNode { it.contentDescription?.toString()?.startsWith(label)==true }
+
     private fun rect(text: String): Rect {
         var result: AccessibilityNodeInfo?=null
-        try { await("IME key $text") { result=findNode { it.text?.toString()==text || it.contentDescription?.toString()?.startsWith(text)==true }; result!=null } }
+        try { await("IME key $text") { result=findLabel(text); result!=null } }
         catch (e: AssertionError) {
             val labels=mutableListOf<String>()
             fun collect(n: AccessibilityNodeInfo?) { if (n==null) return; n.text?.toString()?.takeIf { it.isNotBlank() }?.let(labels::add); for (i in 0 until n.childCount) collect(n.getChild(i)) }
@@ -412,7 +455,7 @@ class DeviceInputTest {
         // instead of screen coordinates that can briefly refer to its previous position.
         // Learning may replace a candidate view between its lookup and the action.
         await("IME action $text") {
-            val node=findNode { it.text?.toString()==text || it.contentDescription?.toString()?.startsWith(text)==true }
+            val node=findLabel(text)
             val clicked=node?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true
             if (!clicked) node?.performAction(AccessibilityNodeInfo.AccessibilityAction.ACTION_SHOW_ON_SCREEN.id)
             clicked

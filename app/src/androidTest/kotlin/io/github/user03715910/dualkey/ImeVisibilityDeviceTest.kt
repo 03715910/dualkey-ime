@@ -160,7 +160,7 @@ class ImeVisibilityDeviceTest {
             await("PNG received from preview") { mediaResult().contains("image/png; match=true") }
             click("copy-test.jpeg")
             keyboardAction("コピープレビューを閉じる")
-            keyboardAction("クリップボード履歴")
+            keyboardAction("貼り付け。長押しで履歴",AccessibilityNodeInfo.ACTION_LONG_CLICK)
             keyboardAction("履歴を固定")
             await("JPEG pinned for permanent reuse") {
                 app.clipboardMedia.pinnedEntries.value.any { it.media.mime=="image/jpeg" && it.media.file.isFile }
