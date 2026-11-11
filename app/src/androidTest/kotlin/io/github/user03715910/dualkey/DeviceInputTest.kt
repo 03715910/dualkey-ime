@@ -165,18 +165,20 @@ class DeviceInputTest {
     }
 
     @Test fun symbolCatalogInsertsAcrossCategoriesAndPasteStillOpensClipboardHistory() {
-        touch(rect("記号一覧を開く"))
-        touch(rect("数学")); touch(rect("記号：∞"))
-        touch(rect("矢印"))
+        clickLabel("記号一覧を開く")
+        clickLabel("数学"); clickLabel("記号：∞")
+        await("infinity inserted") { inputText()=="∞" }
+        clickLabel("矢印")
         assertTrue(findNode { it.contentDescription=="記号の一覧" }?.isScrollable==true)
-        touch(rect("記号：←"))
-        touch(rect("丸数字")); touch(rect("記号：①"))
-        assertEquals("∞←①",inputText())
+        clickLabel("記号：←")
+        await("arrow inserted") { inputText()=="∞←" }
+        clickLabel("丸数字"); clickLabel("記号：①")
+        await("circled number inserted") { inputText()=="∞←①" }
 
-        touch(rect("記号一覧を閉じる"))
-        touch(rect("あ行"))
-        assertEquals("∞←①あ",inputText())
-        touch(rect("記号一覧を開く"))
+        clickLabel("記号一覧を閉じる")
+        clickLabel("あ行")
+        await("returned to kana keyboard") { inputText()=="∞←①あ" }
+        clickLabel("記号一覧を開く")
         hold(rect("貼り付け"))
         await("clipboard history via Paste long press") {
             findNode { it.text?.toString()?.startsWith("履歴保存はOFF")==true }!=null
@@ -795,12 +797,12 @@ class DeviceInputTest {
         assertEquals("こんにちは！？ really?", inputText())
 
         resetPunctuationEditor("Hello日本語　")
-        touch(rect("記号"))
-        touch(rect("?"))
+        clickLabel("記号")
+        clickLabel("?")
         assertEquals("Hello日本語　？", inputText())
         resetPunctuationEditor("日本語abc ")
-        touch(rect("記号"))
-        touch(rect("!"))
+        clickLabel("記号")
+        clickLabel("!")
         assertEquals("日本語abc !", inputText())
     }
 
