@@ -49,7 +49,7 @@ class DeviceInputTest {
         val labels=mutableListOf<String>()
         fun collect(node: AccessibilityNodeInfo?) { if (node==null) return; node.text?.toString()?.let(labels::add); for (i in 0 until node.childCount) collect(node.getChild(i)) }
         instrumentation.uiAutomation.windows.filter { it.type==AccessibilityWindowInfo.TYPE_INPUT_METHOD }.forEach { collect(it.root) }
-        fail("Timed out: $label; input=${if (::editor.isInitialized) inputText() else "not ready"}; IME=${labels.joinToString(" | ")}")
+        fail("Timed out: $label; input=${if (::editor.isInitialized) inputText() else "not ready"}; IME=${labels.joinToString(" | ")}\n${diagnostic()}")
     }
     private fun inputText(): String { var value=""; main { value=editor.text.toString() }; return value }
     private fun imeHeight(): Int {
@@ -485,24 +485,24 @@ class DeviceInputTest {
         await("bottom editor served") { "fieldId=${editor.id}\n" in diagnostic().replace("\r\n","\n") }
     }
     @Test fun hiddenCaptionLeavesTheBottomEditorVisibleAndTouchableDuringHardwareConversion() {
-        fun assertImeClosed() {
-            val state=diagnostic()
-            assertTrue(state,"windowShown=false" in state && "candidateHost=false" in state)
-            assertEquals(0,imeHeight())
-            assertNull(hardwareNode("物理キーボードの候補一覧"))
-        }
         bottomEditor(); letters("KYOU")
-        assertEquals("きょう",inputText()); assertImeClosed()
+        assertEquals("きょう",inputText())
         key(KeyEvent.KEYCODE_SPACE)
-        assertEquals("今日",inputText()); assertImeClosed()
+        await("conversion list with the caption setting enabled") { hardwareNode("物理候補：今日")?.isSelected==true }
+        assertEquals("今日",inputText())
+        assertEquals("Candidate-only IME must reserve no bottom space",0,imeHeight())
+        captureHardware("bottom-editor-with-hidden-caption-candidates")
         key(KeyEvent.KEYCODE_SPACE)
-        assertNotEquals("今日",inputText()); assertImeClosed()
+        assertNotEquals("今日",inputText())
         key(KeyEvent.KEYCODE_DPAD_UP)
-        assertEquals("今日",inputText()); assertImeClosed()
+        assertEquals("今日",inputText())
         key(KeyEvent.KEYCODE_ESCAPE)
-        assertEquals("きょう",inputText()); assertImeClosed()
+        assertEquals("きょう",inputText())
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
         key(KeyEvent.KEYCODE_HENKAN); key(KeyEvent.KEYCODE_ENTER)
-        assertEquals("今日",inputText()); assertImeClosed()
+        assertEquals("今日",inputText())
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        assertEquals(0,imeHeight())
         captureHardware("bottom-editor-after-hidden-conversion")
         var touched=false
         val bounds=Rect()
@@ -525,7 +525,6 @@ class DeviceInputTest {
         }
     }
     @Test fun hardwareCandidatesKeepBottomMultilineEditorClearWithoutCursorUpdates() {
-        allowCandidateWindowWhileHidden()
         bottomEditor(multiline=true,reportsCursor=false)
         letters("KYOU"); key(KeyEvent.KEYCODE_SPACE)
         await("candidate visible") { hardwareNode("物理候補：今日")?.isVisibleToUser==true }
@@ -551,7 +550,7 @@ class DeviceInputTest {
         key(KeyEvent.KEYCODE_ENTER)
         assertEquals("今日",inputText())
         assertNull(hardwareNode("物理キーボードの候補一覧"))
-        assertCandidateOnly()
+        assertEquals(0,imeHeight())
     }
     @Test fun captionSettingCanRestoreTheBarAndFullKeyboardRestoresItAutomatically() {
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
@@ -823,6 +822,14 @@ class DeviceInputTest {
             await("partial selection credited to the original reading") { counts()["⋯"] == (original["⋯"] ?: 0) + 7 }
             letters("TEN")
             await("short learned prefix visible") { findNode { it.text?.toString() == "⋯" } != null }
+            ImeControl.request(DisplayMode.HIDDEN)
+            await("keys hidden for learned prediction") { imeHeight()==0 }
+            key(KeyEvent.KEYCODE_ESCAPE)
+            letters("TEN")
+            await("hardware panel uses learned prefix") { hardwareNode("物理候補：⋯")?.isVisibleToUser==true }
+            assertEquals(0,imeHeight())
+            ImeControl.request(DisplayMode.FULL)
+            await("keys restored after the candidate-only window") { imeHeight()>300 }
             resetPunctuationEditor(options = EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING)
             letters("TENTENTEN")
             clickLabel("⋯")
@@ -859,7 +866,6 @@ class DeviceInputTest {
         main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
     }
     @Test fun hiddenHardwareConversionShowsOnlyTheCandidateWindowAndAllowsTouch() {
-        allowCandidateWindowWhileHidden()
         ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
         letters("KYOU"); key(KeyEvent.KEYCODE_HENKAN)
         await("floating candidates while keyboard hidden") { hardwareNode("物理候補：今日")!=null }
@@ -869,7 +875,6 @@ class DeviceInputTest {
         assertNull(hardwareNode("物理キーボードの候補一覧")); assertCandidateOnly()
     }
     @Test fun tabCyclesPostCommitPredictionsInHiddenModeAndShiftTabGoesBack() {
-        allowCandidateWindowWhileHidden()
         ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
         commitTsudukiwo()
         assertNull(hardwareNode("物理キーボードの候補一覧"))
@@ -877,13 +882,63 @@ class DeviceInputTest {
         await("Tab selects first next word") { hardwareNode("物理候補：お願いします")?.isSelected==true }
         assertEquals("続きを",inputText()); assertCandidateOnly(); captureHardware("next-word-tab")
         key(KeyEvent.KEYCODE_TAB)
-        assertTrue(hardwareNode("物理候補：教えてください")!!.isSelected)
+        await("Tab moves to the next prediction") { hardwareNode("物理候補：教えてください")?.isSelected==true }
         key(KeyEvent.KEYCODE_TAB,KeyEvent.META_SHIFT_ON)
-        assertTrue(hardwareNode("物理候補：お願いします")!!.isSelected)
+        await("Shift+Tab moves to the previous prediction") { hardwareNode("物理候補：お願いします")?.isSelected==true }
         key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
         assertEquals("続きを教えてください",inputText())
         main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
         assertNull(hardwareNode("物理キーボードの候補一覧"))
+    }
+    @Test fun hiddenHardwarePredictionsSupportModesAndPreserveCompositionOnEscape() {
+        ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
+        letters("OHA")
+        await("predictive list while typing") { hardwareNode("物理候補：おはよう")?.isVisibleToUser==true }
+        key(KeyEvent.KEYCODE_ESCAPE)
+        await("predictive list closed") { hardwareNode("物理キーボードの候補一覧")==null }
+        assertEquals("おは",inputText())
+        key(KeyEvent.KEYCODE_ESCAPE)
+        assertEquals("",inputText())
+
+        letters("NIKO")
+        await("ordinary predictive candidates") { hardwareNode("物理候補：2個")!=null }
+        key(KeyEvent.KEYCODE_F6)
+        await("exact mode") { hardwareNode("物理候補の種類：絞り込み")?.isSelected==true }
+        assertEquals("にこ",inputText())
+        key(KeyEvent.KEYCODE_F6)
+        await("emoji mode") { hardwareNode("物理候補：😊")?.isVisibleToUser==true }
+        val face=Rect().also(hardwareNode("物理候補の種類：顔文字")!!::getBoundsInScreen)
+        touch(face)
+        await("face mode") { hardwareNode("物理候補：(^_^)")?.isVisibleToUser==true }
+        key(KeyEvent.KEYCODE_DPAD_DOWN)
+        captureHardware("hardware-prediction-face-selection")
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("(^_^)",inputText())
+        await("panel closed on commit") { hardwareNode("物理キーボードの候補一覧")==null }
+        assertEquals(0,imeHeight())
+    }
+
+    @Test fun hiddenHardwareCandidateListScrollsAndClosesWhenEditorLosesFocus() {
+        ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
+        letters("KOU"); key(KeyEvent.KEYCODE_SPACE)
+        await("scrollable conversion list") { hardwareNode("物理キーボードの候補一覧")?.isVisibleToUser==true }
+        fun scrollable(node: AccessibilityNodeInfo): AccessibilityNodeInfo? {
+            if (node.isScrollable) return node
+            return (0 until node.childCount).firstNotNullOfOrNull { node.getChild(it)?.let(::scrollable) }
+        }
+        val list=scrollable(hardwareNode("物理キーボードの候補一覧")!!)!!
+        val first=list.getChild(0)?.text
+        assertTrue(list.performAction(AccessibilityNodeInfo.ACTION_SCROLL_FORWARD))
+        await("list scrolled") {
+            hardwareNode("物理キーボードの候補一覧")?.let(::scrollable)?.getChild(0)?.text?.let { it!=first }==true
+        }
+        main {
+            val replacement=EditText(activity).apply { id=View.generateViewId(); isSingleLine=true }
+            activity.findViewById<android.widget.LinearLayout>(R.id.page_content).addView(replacement)
+            replacement.requestFocus()
+        }
+        await("candidate window follows editor lifecycle") { hardwareNode("物理キーボードの候補一覧")==null }
+        assertEquals(0,imeHeight())
     }
     @Test fun tabWithoutPredictionsStillMovesToTheNextField() {
         lateinit var next: EditText

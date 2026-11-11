@@ -28,9 +28,6 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     private val compositionAttribution = root.findViewById<ImageView>(R.id.composition_attribution)
     private var googleText: String? = null
     private val expandedScroll = root.findViewById<CandidateGrid>(R.id.candidate_expanded_scroll)
-    private enum class CandidateMode(val label: String) {
-        ALL("すべて"), EXACT("絞り込み"), EMOJI("絵文字"), FACE("顔文字")
-    }
     private var candidateMode=CandidateMode.ALL
     private val candidateTabs=LinearLayout(context).apply {
         layoutParams=LinearLayout.LayoutParams(-1,dp(38))
@@ -286,12 +283,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         updateBody()
     }
     private fun populateExpanded(lists: CandidateLists,selected: Int,select: (Candidate)->Unit,canLoadMore: Boolean,loading: Boolean) {
-        val candidates=when (candidateMode) {
-            CandidateMode.ALL -> lists.all
-            CandidateMode.EXACT -> lists.exact
-            CandidateMode.EMOJI -> lists.emoji
-            CandidateMode.FACE -> lists.face
-        }
+        val candidates=candidateMode.candidates(lists)
         val selectedText=lists.all.getOrNull(selected)?.text
         expandedScroll.submit(candidates.map { it.text },candidates.indexOfFirst { it.text==selectedText },ink,keyColor,{ index ->
             candidateExpanded=false

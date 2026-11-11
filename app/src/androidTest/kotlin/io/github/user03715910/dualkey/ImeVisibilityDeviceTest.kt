@@ -219,7 +219,7 @@ class ImeVisibilityDeviceTest {
     }
 
     @Test fun hardwareCandidatesFitAboveTheMultilineEditorInBothOrientations() {
-        runBlocking { app.settings.set(Prefs.hideImeCaption,false); app.settings.state.first { !it.hideImeCaption } }
+        runBlocking { app.settings.set(Prefs.hideImeCaption,true); app.settings.state.first { it.hideImeCaption } }
         fun find(node: AccessibilityNodeInfo?,description: String): AccessibilityNodeInfo? {
             if (node==null) return null
             if (node.contentDescription?.toString()==description) return node
@@ -241,6 +241,7 @@ class ImeVisibilityDeviceTest {
                 assertTrue("Panel $panel is above the bottom editor $field",panel.bottom<=field.top)
             } finally { display.recycle() }
             assertFalse(ImeControl.state.value.keyboardVisible)
+            assertTrue(fixtureState(),fixtureState().contains("ime=0;"))
             instrumentation.sendKeyDownUpSync(KeyEvent.KEYCODE_ENTER)
             await("panel dismissed") { node("物理キーボードの候補一覧")==null && text()?.endsWith("今日")==true }
             click("end-input"); stableHidden()
