@@ -141,7 +141,7 @@ class DeviceInputTest {
         assertNotNull(gridCandidate { it.substringAfter('：')=="～" })
     }
     @Test fun symbolPanelProvidesTwoDistinctUnicodeWaves() {
-        touch(rect("記号")); touch(rect("#+="))
+        clickLabel("記号"); clickLabel("#+=")
         touch(rect("～")); touch(rect("〜"))
         assertEquals("～〜",inputText())
     }
