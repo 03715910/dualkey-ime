@@ -1,16 +1,17 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 27,
-  "versionName": "0.1.24",
+  "versionCode": 28,
+  "versionName": "0.1.25",
   "releaseDate": "2026-11-11",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.24/DualKeyIME-0.1.24.apk",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.25/DualKeyIME-0.1.25.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "a50e82fa62fc43496067e5d4fa08b26212ac7c23618a71f7512aaf39973a2a0f",
+  "sha256": "87a450aa13d9e1e2ae0b1e42df0e3308b91ab0cc42ede748ef3abae3a9459ef1",
   "sizeBytes": 101769587,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "物理キーボードで日本語を入力すると、下部バーを隠した状態でも、カーソル付近に変換・予測候補の一覧を表示します。",
-    "候補一覧をスクロールでき、F6またはタブのタップで「すべて」「絞り込み」「絵文字」「顔文字」を切り替えられます。"
+    "記号キーボードを2ページにしました。「#+=」で2ページ目、「123」で1ページ目に戻れます。",
+    "1ページ目に半角の「:」と「;」、2ページ目に「☆」「♪」「→」「〒」「々」「〆」などを追加しました。",
+    "上部の「記号一覧」から、矢印・数学記号・丸数字などを選べます。クリップボード履歴は「貼り付け」の長押しで開けます。"
   ]
 }
