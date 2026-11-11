@@ -1,6 +1,22 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 27,
+    "versionName": "0.1.24",
+    "releaseDate": "2026-11-11",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.24/DualKeyIME-0.1.24.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "a50e82fa62fc43496067e5d4fa08b26212ac7c23618a71f7512aaf39973a2a0f",
+    "sizeBytes": 101769587,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "物理キーボードで日本語を入力すると、下部バーを隠した状態でも、カーソル付近に変換・予測候補の一覧を表示します。",
+      "候補一覧をスクロールでき、F6またはタブのタップで「すべて」「絞り込み」「絵文字」「顔文字」を切り替えられます。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 26,
     "versionName": "0.1.23",
     "releaseDate": "2026-11-09",

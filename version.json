@@ -1,16 +1,16 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 26,
-  "versionName": "0.1.23",
-  "releaseDate": "2026-11-09",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.23/DualKeyIME-0.1.23.apk",
+  "versionCode": 27,
+  "versionName": "0.1.24",
+  "releaseDate": "2026-11-11",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.24/DualKeyIME-0.1.24.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "a40a2e3b33ab245e97fc653cd45817f44020674ad6db6bf4845ff0626dea7bd2",
+  "sha256": "a50e82fa62fc43496067e5d4fa08b26212ac7c23618a71f7512aaf39973a2a0f",
   "sizeBytes": 101769587,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "繰り返し選んだ変換候補を入力途中にも表示します。「⋯」と「…」は別々に学習し、従来の学習データを引き継ぎます。",
-    "「!」「?」の幅を直前の日本語・英語に合わせます。候補で指定した記号や、URL・メールなどの専用入力欄での半角入力は維持します。"
+    "物理キーボードで日本語を入力すると、下部バーを隠した状態でも、カーソル付近に変換・予測候補の一覧を表示します。",
+    "候補一覧をスクロールでき、F6またはタブのタップで「すべて」「絞り込み」「絵文字」「顔文字」を切り替えられます。"
   ]
 }
