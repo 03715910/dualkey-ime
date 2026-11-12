@@ -49,6 +49,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         })
     }
     private var hardwareCandidates=false
+    private var hardwareComposition=false
     private var hardwareMode=CandidateMode.ALL
     private var candidateHostRequested=false
     private var candidateHostRetry: Job?=null
@@ -506,7 +507,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private fun clearState() {
         compositionRestoreJob?.cancel(); compositionRestoreJob=null
         rotationComposition=null; composingEnd=null
-        hardwareCandidates=false; closeHardwarePanel(true); hardwarePanel.clearCursor()
+        hardwareCandidates=false; hardwareComposition=false; closeHardwarePanel(true); hardwarePanel.clearCursor()
         committedTail=null; continuationCandidates=false
         candidateJob?.cancel(); candidateQuery=null; candidateLoading=false; requestedReading=""; requestedLimit=0
         invalidateTranslation(); resetVariant(); composer.clear(); englishWord=""; candidates=emptyList(); candidateRecords=emptyList(); candidateLists=CandidateLists(); selected=-1; converting=false
@@ -516,7 +517,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private fun resetConversion() { selected=-1; converting=false }
     private fun refreshCandidates() {
         continuationCandidates=false
-        if (japaneseConversionAllowed && !english && !composer.isEmpty && (converting || settings.japanesePrediction)) {
+        if (japaneseConversionAllowed && !english && !composer.isEmpty &&
+            (converting || settings.japanesePrediction && !hardwareComposition)) {
             if (requestedReading!=composer.reading) { requestedReading=composer.reading; requestedLimit=maxOf(64,settings.candidateCount) }
             val query=CandidateQuery(composer.reading,!converting && predictionsAllowed && settings.japanesePrediction,
                 maxOf(settings.candidateCount,requestedLimit),settings.dictionary,conversion,
@@ -595,29 +597,24 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         },canExpand,candidateLoading,reading)
         showHardwareCandidates()
     }
-    private fun hardwarePrediction() = !converting && !continuationCandidates &&
-        predictionsAllowed && settings.japanesePrediction && !composer.isEmpty && variant==null
-
     private fun canLoadMoreHardwareCandidates() = !candidateLoading &&
         (hardwareMode==CandidateMode.ALL || hardwareMode==CandidateMode.EXACT) &&
         candidateQuery?.let { it.limit<10000 && candidateRecords.size>=it.limit }==true
 
     private fun chooseHardwareMode(mode: CandidateMode) {
-        if (!hardwareCandidates || !hasEditor() || continuationCandidates || mode==hardwareMode) return
+        if (!hardwareCandidates || !hasEditor() || !converting || mode==hardwareMode) return
         hardwareMode=mode
         selected=-1
         setCandidateRecords(candidateLists)
-        if (converting) {
-            if (candidates.isNotEmpty()) selected=0
-            syncComposition()
-        } else showCandidates()
+        if (candidates.isNotEmpty()) selected=0
+        syncComposition()
     }
 
     private fun showHardwareCandidates() {
         val needsCandidateHost=visibility.mode==DisplayMode.HIDDEN || !editorRequested
         if (!hardwareCandidates || !hasEditor() || sensitive || english || !japaneseConversionAllowed ||
             (continuationCandidates && selected !in candidates.indices) ||
-            (!converting && !continuationCandidates && !hardwarePrediction()) || candidateLists.all.isEmpty()) {
+            (!converting && !continuationCandidates) || candidateLists.all.isEmpty()) {
             val thinHost=needsCandidateHost && settings.hideImeCaption
             closeHardwarePanel(releaseHost=thinHost && (!hardwareCandidates || !hasEditor() || !candidateLoading))
             return
@@ -635,11 +632,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         }
         val host=window?.window?.decorView ?: return
         val top=visibleKeyboard()?.let { view -> IntArray(2).also(view::getLocationOnScreen)[1] }
-        val title=when {
-            converting -> "変換候補"
-            continuationCandidates -> "続きの予測"
-            else -> "入力中の予測"
-        }
+        val title=if (continuationCandidates) "続きの予測" else "変換候補"
         hardwarePanel.show(host,candidateRecords,selected,title,hardwareMode.takeUnless { continuationCandidates },top,
             needsCandidateHost && settings.hideImeCaption,canLoadMoreHardwareCandidates())
     }
@@ -780,7 +773,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         }
         resetConversion(); refreshCandidates()
     }
-    private fun type(key: String, hardwarePrediction: Boolean=false) {
+    private fun type(key: String, physical: Boolean=false) {
         if (!hasEditor()) return
         val value = if (key == "!" || key == "?") {
             val composing = when {
@@ -804,7 +797,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             if (converting || variant!=null) commitComposition()
             committedTail?.let { if (composer.isEmpty && !validTail(it)) committedTail=null }
             composer.append(value); resetConversion()
-            hardwareCandidates=hardwarePrediction && value.any(Char::isLetter)
+            hardwareComposition=physical
             if (compositionRestoreJob?.isActive!=true) currentInputConnection?.setComposingText(composer.text,1)
         }
         if (compositionRestoreJob?.isActive!=true) rememberComposingEnd()
@@ -880,9 +873,6 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             finishEnglish(); committedTail=null; resetConversion(); currentInputConnection?.commitText("\n",1); refreshCandidates(); return
         }
         if (continuationCandidates && selected in candidates.indices) { commitCandidate(selected); return }
-        if (physical && !shiftPressed && hardwareCandidates && hardwarePrediction() && selected in candidates.indices) {
-            commitCandidate(selected); return
-        }
         if (!composer.isEmpty) { commitComposition(true); return }
         committedTail=null; finishEnglish(); refreshCandidates()
         val behavior=if (physical) settings.physicalEnter else settings.screenEnter
@@ -1369,7 +1359,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 }
                 rebuild()
             }
-            "space" -> space()
+            "space" -> if (symbolPage==null) space() else insertSymbol(" ")
             "enter" -> enter()
             "delete" -> delete()
             "delete_chunk" -> deleteChunk()
@@ -1416,12 +1406,16 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             }
             keyCode==KeyEvent.KEYCODE_EISU -> switchMode(true)
             keyCode==KeyEvent.KEYCODE_KANA || keyCode==KeyEvent.KEYCODE_KATAKANA_HIRAGANA -> switchMode(false)
-            keyCode==KeyEvent.KEYCODE_HENKAN && !english -> { hardwareCandidates=!composer.isEmpty; space() }
-            keyCode==KeyEvent.KEYCODE_MUHENKAN && !english && !composer.isEmpty -> { invalidateTranslation(); resetVariant(); resetConversion(); syncComposition() }
+            keyCode==KeyEvent.KEYCODE_HENKAN && !english -> {
+                if (!composer.isEmpty) { hardwareCandidates=true; space() }
+            }
+            keyCode==KeyEvent.KEYCODE_MUHENKAN && !english && !composer.isEmpty -> {
+                hardwareCandidates=false
+                invalidateTranslation(); resetVariant(); resetConversion(); syncComposition()
+            }
             event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> { commitComposition(); committedTail=null; finishEnglish(); handled=false }
             keyCode==KeyEvent.KEYCODE_SPACE -> { hardwareCandidates=!english && !composer.isEmpty; space() }
-            keyCode==KeyEvent.KEYCODE_F6 && hardwareCandidates && !continuationCandidates &&
-                candidateLists.all.isNotEmpty() && (converting || hardwarePrediction()) -> {
+            keyCode==KeyEvent.KEYCODE_F6 && hardwareCandidates && converting && candidateLists.all.isNotEmpty() -> {
                 if (event.repeatCount==0) {
                     val modes=CandidateMode.entries
                     val step=if (event.isShiftPressed) -1 else 1
@@ -1429,7 +1423,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
                 }
             }
             keyCode==KeyEvent.KEYCODE_TAB && !english && !sensitive && candidates.isNotEmpty() &&
-                (converting || continuationCandidates || hardwareCandidates && hardwarePrediction()) -> {
+                (converting || continuationCandidates) -> {
                 // Only take Tab when there are actual choices. Ordinary form navigation is untouched.
                 stepHardwareCandidate(if (event.isShiftPressed) -1 else 1)
             }
@@ -1444,19 +1438,17 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             }
             keyCode==KeyEvent.KEYCODE_ESCAPE && (continuationCandidates || !composer.isEmpty || englishWord.isNotEmpty()) -> {
                 invalidateTranslation()
-                val closePrediction=hardwareCandidates && hardwarePrediction()
                 hardwareCandidates=false
                 if (composer.isEmpty && englishWord.isEmpty()) { committedTail=null; resetConversion(); refreshCandidates() }
                 else if (variant!=null) { resetVariant(); resetConversion(); syncComposition() }
-                else if (converting || closePrediction) { resetConversion(); syncComposition() }
+                else if (converting) { resetConversion(); syncComposition() }
                 else { composer.clear(); englishWord=""; currentInputConnection?.setComposingText("",1); currentInputConnection?.finishComposingText(); refreshCandidates() }
             }
             keyCode in setOf(KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_DOWN) -> {
                 val vertical=keyCode==KeyEvent.KEYCODE_DPAD_UP || keyCode==KeyEvent.KEYCODE_DPAD_DOWN
                 val chooseContinuation=continuationCandidates && (visibility.mode!=DisplayMode.HIDDEN || hardwareCandidates) &&
                     (selected>=0 || vertical)
-                if (candidates.isNotEmpty() &&
-                    (converting || chooseContinuation || (hardwareCandidates && vertical && hardwarePrediction()))) {
+                if (candidates.isNotEmpty() && (converting || chooseContinuation)) {
                     stepHardwareCandidate(if (keyCode==KeyEvent.KEYCODE_DPAD_LEFT || keyCode==KeyEvent.KEYCODE_DPAD_UP) -1 else 1)
                 } else { commitComposition(); committedTail=null; finishEnglish(); refreshCandidates(); handled=false }
             }

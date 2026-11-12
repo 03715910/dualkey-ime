@@ -152,9 +152,15 @@ class DeviceInputTest {
         for (symbol in listOf(":", "@", ".", "-", "/", "¥", "#", "\"")) touch(rect(symbol))
         assertEquals("か:@.-/¥#\"",inputText())
 
+        val space=rect("空白")
+        val delete=rect("⌫")
+        assertTrue(space.width() >= rect(",").width()*3)
+        val keyboardCenter=(rect("1").left+delete.right)/2
+        assertTrue(kotlin.math.abs(space.centerX()-keyboardCenter)<=3)
         val nextPage=rect("#+=")
         touch(nextPage)
         assertEquals(nextPage,rect("123"))
+        assertEquals(space,rect("空白"))
         for (symbol in listOf("☆", "♪", "→", "〒", "々", "〆", "\\", "：")) touch(rect(symbol))
         assertEquals("か:@.-/¥#\"☆♪→〒々〆\\：",inputText())
 
@@ -935,32 +941,59 @@ class DeviceInputTest {
         main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
         assertNull(hardwareNode("物理キーボードの候補一覧"))
     }
-    @Test fun hiddenHardwarePredictionsSupportModesAndPreserveCompositionOnEscape() {
+    @Test fun hiddenHardwareCandidatesWaitForConversionAndSupportAllModes() {
         ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
         letters("OHA")
-        await("predictive list while typing") { hardwareNode("物理候補：おはよう")?.isVisibleToUser==true }
+        assertEquals("おは",inputText())
+        assertTrue("Typing alone must not request the candidate window",diagnostic().contains("requested=false"))
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        assertCandidateOnly()
+        key(KeyEvent.KEYCODE_SPACE)
+        await("conversion requested with Space") { hardwareNode("物理キーボードの候補一覧")?.isVisibleToUser==true }
         key(KeyEvent.KEYCODE_ESCAPE)
-        await("predictive list closed") { hardwareNode("物理キーボードの候補一覧")==null }
+        await("conversion list closed") { hardwareNode("物理キーボードの候補一覧")==null }
         assertEquals("おは",inputText())
         key(KeyEvent.KEYCODE_ESCAPE)
         assertEquals("",inputText())
 
         letters("NIKO")
-        await("ordinary predictive candidates") { hardwareNode("物理候補：2個")!=null }
+        assertEquals("にこ",inputText())
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        key(KeyEvent.KEYCODE_HENKAN)
+        await("conversion requested with Henkan") { hardwareNode("物理候補：2個")!=null }
         key(KeyEvent.KEYCODE_F6)
         await("exact mode") { hardwareNode("物理候補の種類：絞り込み")?.isSelected==true }
-        assertEquals("にこ",inputText())
+        assertEquals("2個",inputText())
         key(KeyEvent.KEYCODE_F6)
         await("emoji mode") { hardwareNode("物理候補：😊")?.isVisibleToUser==true }
         val face=Rect().also(hardwareNode("物理候補の種類：顔文字")!!::getBoundsInScreen)
         touch(face)
-        await("face mode") { hardwareNode("物理候補：(^_^)")?.isVisibleToUser==true }
-        key(KeyEvent.KEYCODE_DPAD_DOWN)
-        captureHardware("hardware-prediction-face-selection")
+        await("face mode selects its first choice") {
+            hardwareNode("物理候補の種類：顔文字")?.isSelected==true && inputText()=="(^_^)"
+        }
+        captureHardware("hardware-conversion-face-selection")
         key(KeyEvent.KEYCODE_ENTER)
         assertEquals("(^_^)",inputText())
         await("panel closed on commit") { hardwareNode("物理キーボードの候補一覧")==null }
         assertEquals(0,imeHeight())
+    }
+
+    @Test fun hardwareConversionSupportsParticlesLoanwordsAndNewFaces() {
+        letters("NOKIGOU")
+        assertEquals("のきごう",inputText())
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        key(KeyEvent.KEYCODE_SPACE)
+        assertEquals("の記号",inputText())
+        key(KeyEvent.KEYCODE_ENTER)
+        letters("WINDOUZU"); key(KeyEvent.KEYCODE_SPACE)
+        await("original Windows spelling") { hardwareNode("物理候補：Windows")?.isVisibleToUser==true }
+        key(KeyEvent.KEYCODE_DPAD_DOWN); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("の記号Windows",inputText())
+        letters("RYOUKAI"); key(KeyEvent.KEYCODE_SPACE)
+        repeat(3) { key(KeyEvent.KEYCODE_F6) }
+        await("new acknowledgement faces") { hardwareNode("物理候補：(｀･ω･´)ゞ")?.isVisibleToUser==true }
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("の記号Windows(｀･ω･´)ゞ",inputText())
     }
 
     @Test fun hiddenHardwareCandidateListScrollsAndClosesWhenEditorLosesFocus() {

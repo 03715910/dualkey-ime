@@ -5,10 +5,10 @@ enum class CandidateKind { WORD, SYMBOL, EMOJI, FACE, RELATED }
 enum class CandidateReason(val direct: Boolean = false) {
     DICTIONARY_EXACT(true), LITERAL(true), KATAKANA(true), SEGMENTED(true), WEAK_SEGMENT,
     PREFIX, TAIL, NEXT_WORD, SYMBOL(true), EXPRESSION_EXACT, EXPRESSION_MEANING, EXPRESSION_PREFIX,
-    MEANING, USER_DICTIONARY(true), USER_PREFIX, LEARNED, COUNTER(true), PHRASE(true), PHRASE_PREFIX
+    MEANING, LOANWORD_SPELLING(true), USER_DICTIONARY(true), USER_PREFIX, LEARNED, COUNTER(true), PHRASE(true), PHRASE_PREFIX
 }
 
-enum class CandidateSource { JAPANESE_LEXICON, USER_DICTIONARY, INPUT, FALLBACK, PHRASE, SYMBOL_ALIAS, SYMBOL_DICTIONARY, EXPRESSION, JMDICT, HISTORY }
+enum class CandidateSource { JAPANESE_LEXICON, USER_DICTIONARY, INPUT, FALLBACK, PHRASE, SYMBOL_ALIAS, SYMBOL_DICTIONARY, EXPRESSION, JMDICT, LOANWORD_ALIAS, HISTORY }
 
 data class CandidateEvidence(
     val reason: CandidateReason,
@@ -24,9 +24,10 @@ data class CandidateEvidence(
     val choice: LearnedChoice? = null,
     val continuation: LearnedContinuation? = null,
     val context: String? = null,
+    val styleCost: Int = 0,
 ) {
     val addedReadingLength get() = reading.length - matchedLength
-    val cost get() = wordCost?.let { it + connectionCost + completionCost }
+    val cost get() = wordCost?.let { it + connectionCost + completionCost + styleCost }
 }
 
 data class Candidate(

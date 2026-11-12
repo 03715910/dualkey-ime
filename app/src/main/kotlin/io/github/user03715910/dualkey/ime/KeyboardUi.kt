@@ -260,14 +260,14 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             SymbolPage.NUMBERS -> listOf(
                 "1 2 3 4 5 6 7 8 9 0",
                 "@ # ¥ $ € % & _ - +",
-                "#+= \" * ' : / ! ? = ⌫",
-                "戻る , 空白 . ; ( ) ↵",
+                "#+= \" * ' : / ! ? ~ ⌫",
+                "戻る , ; 空白 . = ↵",
             )
             SymbolPage.EXTRA -> listOf(
                 "☆ ♪ → ○ × ÷ < > ^ |",
-                "「 」 『 』 [ ] { } \\ ~",
+                "「 」 『 』 ( ) [ ] \\ ！",
                 "123 〒 々 〆 ゜ ・ ー ～ 〜 ⌫",
-                "戻る 、 空白 。 … ： ！ ？ ↵",
+                "戻る 、 ？ 空白 。 ： ↵",
             )
         }
         for (row in rows) keys.addView(LinearLayout(context).apply {
@@ -290,9 +290,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
                     else -> label
                 }
                 addView(button(label,action,function=label!=action,description=description).apply {
-                    if (action=="space") {
-                        (layoutParams as LinearLayout.LayoutParams).weight=if (page==SymbolPage.NUMBERS) 3f else 2f
-                    }
+                    if (action=="space") (layoutParams as LinearLayout.LayoutParams).weight=4f
                 })
             }
         })

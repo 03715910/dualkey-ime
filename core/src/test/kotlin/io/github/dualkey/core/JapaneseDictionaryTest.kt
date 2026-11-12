@@ -58,6 +58,22 @@ class JapaneseDictionaryTest {
         assertTrue(words("とうきょ", true).toString(), "東京" in words("とうきょ", true))
         assertTrue(words("きょうはにほ", true, 60).toString(), "今日は日本語" in words("きょうはにほ", true, 60))
     }
+    @Test fun clausesStartingMidSentenceKeepHiraganaParticlesAndNaturalKanji() {
+        val examples = mapOf(
+            "のきごう" to "の記号",
+            "についてです" to "についてです",
+            "をさんこうにするといいかもしれません" to "を参考にするといいかもしれません",
+            "はにほんごをべんきょうします" to "は日本語を勉強します",
+            "のなかにあります" to "の中にあります",
+        )
+        for ((reading, expected) in examples) {
+            val candidates = JapaneseCandidates.generate(reading, false, 64, engine)
+            assertEquals(reading, expected, candidates.all.first().text)
+            assertEquals(reading, expected, candidates.exact.first().text)
+            assertTrue(reading, candidates.all.any { it.text == SemanticConversion.katakana(reading) })
+        }
+        assertEquals("あいおえう".repeat(33), words("あいおえう".repeat(33)).first())
+    }
     @Test fun userDictionaryLiteralsAndNormalization() {
         val custom = DictionaryConversionEngine(lexicon) { mapOf("でゅある" to listOf("DualKey")) }
         assertEquals("DualKey", custom.candidates("でゅある", false, 30).first().text)

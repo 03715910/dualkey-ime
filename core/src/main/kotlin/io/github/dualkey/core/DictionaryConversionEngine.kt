@@ -14,8 +14,9 @@ class DictionaryConversionEngine(
         val text: String, val right: Int, val wordCost: Int, val connectionCost: Int = 0,
         val unknown: Boolean = false, val weak: Boolean = false,
         val learningDiscount: Int = 0, val left: Int = 0,
+        val startsWithParticle: Boolean = false, val styleCost: Int = 0,
     ) {
-        val rankCost get() = wordCost + connectionCost - learningDiscount
+        val rankCost get() = wordCost + connectionCost + styleCost - learningDiscount
     }
 
     private fun best(paths: List<Path>, limit: Int): List<Path> {
@@ -46,7 +47,8 @@ class DictionaryConversionEngine(
             val completion = if (addedLength == 0) 0 else addedLength * 90
             result += Candidate((prefix?.text ?: "") + word.text, reading, CandidateKind.WORD,
                 CandidateEvidence(reason, source, reading, input.length, wordCost, connection, completion,
-                    leftPos = if (prefix == null || prefix.text.isEmpty()) word.left else prefix.left, rightPos = word.right))
+                    leftPos = if (prefix == null || prefix.text.isEmpty()) word.left else prefix.left, rightPos = word.right,
+                    styleCost = prefix?.styleCost ?: 0))
         }
         // Read exact entries independently of the lattice beam and prefix lookup budgets.
         lexicon.exact(input, 10000).forEach { addWord(it, CandidateReason.DICTIONARY_EXACT) }
@@ -70,6 +72,12 @@ class DictionaryConversionEngine(
             }
             val end = start + Character.charCount(Character.codePointAt(input, start))
             matches.add(LexiconMatch(end, LexiconWord(input.substring(start, end), 1851, 1851, 10000), true))
+            // A composing span can start in the middle of a sentence. Preserve
+            // hiragana function words where the dictionary attests that reading.
+            val functionWordEnds = matches.asSequence().filter { match ->
+                lexicon.hasBundledPos && (match.word.left in 29..433 || match.word.left in 2593..2595) &&
+                    match.word.text.any { it in 'ぁ'..'ゖ' } && input.substring(start, match.end) == match.word.text
+            }.map { it.end }.toSet()
             val parentsByLeft = HashMap<Int, List<Path>>()
             for ((finish, word, unknown) in matches) {
                 if (start == 0 && finish == input.length) continue // already collected by exact lookup
@@ -78,16 +86,19 @@ class DictionaryConversionEngine(
                 }
                 val reading = input.substring(start, finish)
                 val discount = Personalization.strength(history[reading]?.get(word.text), now) * 100
-                // The bundled dictionary's id.def places particles at 268..433 and
-                // number nouns at 2043..2055. Match those ranges only for that matrix.
-                val weakStart = start == 0 && lexicon.hasBundledPos && word.left in 268..433
+                val startsWithParticle = start == 0 && lexicon.hasBundledPos && word.left in 268..433
                 val strayDigit = !containsDigits && start > 0 && word.text.all(Char::isDigit) &&
                     lexicon.hasBundledPos && word.left in 2043..2055
+                // Reserve stylized spellings such as ノ and デス as alternatives
+                // when the same span has a normal grammatical spelling.
+                val styleCost = if (finish in functionWordEnds && word.text != reading &&
+                    word.text == SemanticConversion.katakana(reading)) 3000 else 0
                 for (parent in parents) {
                     states[finish].add(Path(parent.text + word.text, word.right, parent.wordCost + word.cost,
                         parent.connectionCost + lexicon.transition(parent.right, word.left), parent.unknown || unknown,
-                        parent.weak || weakStart || strayDigit,
-                        (parent.learningDiscount + discount).coerceAtMost(400), if (start == 0) word.left else parent.left))
+                        parent.weak || strayDigit,
+                        (parent.learningDiscount + discount).coerceAtMost(400), if (start == 0) word.left else parent.left,
+                        parent.startsWithParticle || startsWithParticle, parent.styleCost + styleCost))
                 }
                 if (states[finish].size > 1800) {
                     val compact = best(states[finish], beam * 2)
@@ -101,7 +112,7 @@ class DictionaryConversionEngine(
             val connection = path.connectionCost + lexicon.transition(path.right, 0)
             result += Candidate(path.text, input, if (weak) CandidateKind.RELATED else CandidateKind.WORD,
                 CandidateEvidence(reason, source, input, wordCost = path.wordCost, connectionCost = connection,
-                    learningDiscount = path.learningDiscount, leftPos = path.left, rightPos = path.right))
+                    learningDiscount = path.learningDiscount, leftPos = path.left, rightPos = path.right, styleCost = path.styleCost))
         }
         if (!prediction) return result
 
@@ -111,7 +122,7 @@ class DictionaryConversionEngine(
         for (start in starts) {
             val suffix = input.substring(start)
             if (Character.isLowSurrogate(suffix[0])) continue
-            val parents = best(states[start].filter { !it.unknown && !it.weak }, 3)
+            val parents = best(states[start].filter { !it.unknown && !it.weak && !it.startsWithParticle }, 3)
             if (parents.isEmpty()) continue
             val reason = if (start == 0) CandidateReason.PREFIX else CandidateReason.TAIL
             val groups = if (start == 0) maxOf(64, minOf(1024, count * 2)) else maxOf(24, minOf(64, count / 4))

@@ -76,9 +76,26 @@ object JapaneseCandidates {
             else -> directWords.take(1)
         }
         val showScriptsEarly = counters.isNotEmpty() || matched.isEmpty() && trusted.isEmpty()
-        val direct = mergeCandidates(directHead + (if (showScriptsEarly && directHead.isEmpty()) raw.take(1) else emptyList()) +
-            exactAlias.take(3) + (if (showScriptsEarly) raw else emptyList()) +
-            trusted + directWords + raw + exactAlias + symbol.filter { it.reading == key })
+        val scriptFallback = if (counters.isEmpty() && key.length > 2) raw.asReversed() else raw
+        val leadingJapanese = (trusted + directWords).firstOrNull()?.text ?: key
+        val spellings = SemanticConversion.loanwordSpellings(key, leadingJapanese, semantic)
+        val wordsBeforeScripts = if (key.length > 2) 8 else directWords.size
+        val direct = mergeCandidates(buildList {
+            if (showScriptsEarly && directHead.isEmpty()) addAll(scriptFallback.take(1))
+            if (spellings.isEmpty()) addAll(directHead) else {
+                addAll(directHead.take(1))
+                addAll(spellings)
+                addAll(directHead.drop(1))
+            }
+            addAll(exactAlias.take(3))
+            if (showScriptsEarly) addAll(scriptFallback)
+            addAll(trusted)
+            addAll(directWords.take(wordsBeforeScripts))
+            addAll(raw)
+            addAll(directWords.drop(wordsBeforeScripts))
+            addAll(exactAlias)
+            addAll(symbol.filter { it.reading == key })
+        })
 
         val wholePrefixes = mergeCandidates(group(CandidateReason.USER_PREFIX) +
             group(CandidateReason.PREFIX).sortedWith(byCost))
@@ -88,7 +105,6 @@ object JapaneseCandidates {
         val contextualPrefixes = contextual.filter { it.reading != key }.map { candidate ->
             candidate.copy(evidence = candidate.evidence?.copy(matchedLength = key.length))
         }
-        val leadingJapanese = (trusted + directWords).firstOrNull()?.text ?: key
         val meanings = Personalization.rank(SemanticConversion.suggestions(key, leadingJapanese, semantic), historyForKey, now)
         val emotional = findExpressions(key, prediction, count, expressions, emoji, face, directWords, wholePrefixes,
             historyForKey, now)

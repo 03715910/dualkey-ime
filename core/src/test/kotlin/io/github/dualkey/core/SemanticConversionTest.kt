@@ -52,6 +52,18 @@ class SemanticConversionTest {
         assertTrue("chair" in chair)
         assertFalse("swords" in chair)
     }
+    @Test fun originalSpellingsAreOfferedForJapaneseReadingsEvenWithoutTheOptionalLexicon() {
+        val engine=LocalConversionEngine { mapOf("うぃんどうず" to listOf("ウィンドウズ")) }
+        for ((reading, spelling) in mapOf(
+            "うぃんどうず" to "Windows", "ういんどうず" to "Windows", "うぃんどーず" to "Windows",
+            "あいふぉん" to "iPhone", "ちゃっとじーぴーてぃー" to "ChatGPT", "ぎっとはぶ" to "GitHub",
+        )) {
+            val choices=JapaneseCandidates.generate(reading,false,64,engine)
+            assertTrue(reading, choices.all.take(2).any { it.text==spelling })
+            assertTrue(reading, choices.exact.any { it.text==spelling && it.directlyMatches(reading) })
+            assertEquals(spelling,SemanticConversion.english(null,reading,reading))
+        }
+    }
     @Test fun wholeCompositionReturnsToOriginalHiraganaAcrossCycles() {
         val first=CompositionVariant.start("きょうはいすをかいます","今日は椅子を買います")
         assertEquals("キョウハイスヲカイマス",first.text)
