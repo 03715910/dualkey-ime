@@ -996,6 +996,30 @@ class DeviceInputTest {
         assertEquals("の記号Windows(｀･ω･´)ゞ",inputText())
     }
 
+    @Test fun cryingAndEverydayKaomojiComeFromTheBundledDictionary() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        val dictionary=runBlocking { withTimeout(10_000) { app.expressions.entries.first { it.words.isNotEmpty() } } }
+        val expected=mapOf("なき" to "(T_T)", "泣き" to "(T_T)", "ごうきゅう" to "｡ﾟ(ﾟ´Д｀ﾟ)ﾟ｡",
+            "しくしく" to "( ; _ ; )", "うれしなき" to "( ；∀；)", "あんしん" to "( ´ ▽ ` )ﾎｯ", "しんぱい" to "(；´･ω･)")
+        for ((reading, face) in expected) {
+            assertTrue("$reading → $face",dictionary.find(reading,false,false,false,true).any { it.text==face })
+        }
+        touch(rect("な行"))
+        val ka=rect("か行")
+        touch(ka,dx=-(ka.width()*0.7).toInt())
+        assertEquals("なき",inputText())
+        clickLabel("一覧"); clickLabel("顔文字")
+        val cryingFace=gridCandidate { it.substringAfter('：')=="(´；ω；｀)" } ?: error("Missing crying face")
+        assertTrue(cryingFace.performAction(AccessibilityNodeInfo.ACTION_CLICK))
+        await("crying face committed by tap") { inputText()=="(´；ω；｀)" }
+
+        letters("NAKI"); key(KeyEvent.KEYCODE_SPACE)
+        repeat(3) { key(KeyEvent.KEYCODE_F6) }
+        await("crying faces as conversion candidates") { hardwareNode("物理候補：(T_T)")?.isVisibleToUser==true }
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("(´；ω；｀)(T_T)",inputText())
+    }
+
     @Test fun hiddenHardwareCandidateListScrollsAndClosesWhenEditorLosesFocus() {
         ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
         letters("KOU"); key(KeyEvent.KEYCODE_SPACE)
