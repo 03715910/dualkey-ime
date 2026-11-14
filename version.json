@@ -1,18 +1,16 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 29,
-  "versionName": "0.1.26",
-  "releaseDate": "2026-11-12",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.26/DualKeyIME-0.1.26.apk",
+  "versionCode": 30,
+  "versionName": "0.1.27",
+  "releaseDate": "2026-11-14",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.27/DualKeyIME-0.1.27.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "0a889e785e70e59cc707ef156467079b45f09663660267db9a672b21dd696a5a",
-  "sizeBytes": 101786763,
+  "sha256": "4c65dda0d55e150373997d0333e6612533790b4c6359537a1a0b2a7355b8769b",
+  "sizeBytes": 101787435,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "物理キーボードでの日本語入力は、変換キーまたはSpaceを押すと変換候補が開きます。",
-    "画面の記号キーボードは、両ページとも最下段の中央に幅の広い空白キーを配置しました。",
-    "「の記号」「についてです」など、助詞から始まる文や長文の漢字変換を改善しました。",
-    "「うぃんどうず」からWindowsなどの英字表記を選べます。「了解」「おつかれさま」などの顔文字も追加しました。"
+    "「なき」「泣き」から (T_T) や (´；ω；｀) などの顔文字を変換できます。",
+    "「号泣」「しくしく」「嬉し泣き」「安心」「心配」など、普段の会話で使える顔文字も追加しました。"
   ]
 }

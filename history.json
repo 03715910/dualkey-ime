@@ -1,6 +1,22 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 30,
+    "versionName": "0.1.27",
+    "releaseDate": "2026-11-14",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.27/DualKeyIME-0.1.27.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "4c65dda0d55e150373997d0333e6612533790b4c6359537a1a0b2a7355b8769b",
+    "sizeBytes": 101787435,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "「なき」「泣き」から (T_T) や (´；ω；｀) などの顔文字を変換できます。",
+      "「号泣」「しくしく」「嬉し泣き」「安心」「心配」など、普段の会話で使える顔文字も追加しました。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 29,
     "versionName": "0.1.26",
     "releaseDate": "2026-11-12",
