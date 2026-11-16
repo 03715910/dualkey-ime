@@ -301,7 +301,10 @@ class DualKeyService : InputMethodService() {
         if (!hasEditor()) return false
         if (configChange && !editorRequested && !candidateHostRequested) return false
         // Remember a real editing request even when physical-keyboard policy hides the keys.
-        if (!configChange && !candidateHostRequested) editorRequested=true
+        if (!configChange && !candidateHostRequested) {
+            editorRequested=true
+            KeyboardVisibilityNotification.restoreShowActionIfMissing(this)
+        }
         return (visibility.mode != DisplayMode.HIDDEN && editorRequested) || candidateHostRequested
     }
     override fun onStartInput(attribute: EditorInfo, restarting: Boolean) {
@@ -371,6 +374,7 @@ class DualKeyService : InputMethodService() {
             }
         }
         publishVisibility()
+        if (hasEditor()) KeyboardVisibilityNotification.restoreShowActionIfMissing(this)
         if (japaneseConversionAllowed) runCatching {
             val mode=InputConnection.CURSOR_UPDATE_IMMEDIATE or InputConnection.CURSOR_UPDATE_MONITOR
             val connection=currentInputConnection

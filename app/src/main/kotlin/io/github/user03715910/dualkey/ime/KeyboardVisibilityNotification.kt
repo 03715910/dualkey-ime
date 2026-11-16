@@ -32,6 +32,13 @@ object KeyboardVisibilityNotification {
         val manager=context.getSystemService(NotificationManager::class.java)
         return NotificationManagerCompat.from(context).areNotificationsEnabled() && manager.getNotificationChannel(CHANNEL)?.importance!=NotificationManager.IMPORTANCE_NONE
     }
+    fun restoreShowActionIfMissing(context: Context) {
+        val app=context.applicationContext as DualKeyApp
+        if (!app.hardwareKeyboardConnected.value || ImeControl.state.value.keyboardVisible ||
+            !app.settings.isLoaded || !app.settings.state.value.visibilityNotification) return
+        val manager=context.getSystemService(NotificationManager::class.java)
+        if (manager.activeNotifications.none { it.id==ID && it.tag==null }) refresh(context)
+    }
     fun refresh(context: Context) {
         val app=context.applicationContext as DualKeyApp
         val manager=NotificationManagerCompat.from(context)

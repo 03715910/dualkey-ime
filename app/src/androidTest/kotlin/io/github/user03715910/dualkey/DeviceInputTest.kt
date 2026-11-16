@@ -724,6 +724,33 @@ class DeviceInputTest {
         SystemClock.sleep(300)
         assertTrue("A delayed show action does not hide the visible keys",imeHeight()>300)
     }
+    @Test fun tappingTheFocusedEditorRestoresTheDismissedShowNotification() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        org.junit.Assume.assumeTrue("Use an emulator with a hardware keyboard",app.hardwareKeyboardConnected.value)
+        enableControlNotification()
+        ImeControl.request(DisplayMode.HIDDEN)
+        await("show action while keyboard is hidden") {
+            imeHeight()==0 && controlNotification()?.actions?.firstOrNull()?.title?.toString()=="キーボードを表示"
+        }
+        app.getSystemService(NotificationManager::class.java).cancel(KeyboardVisibilityNotification.ID)
+        await("notification removed without changing the IME state") {
+            controlNotification()==null && ImeControl.state.value.editorActive
+        }
+        val inputBounds=Rect()
+        main {
+            assertTrue(editor.hasFocus())
+            val position=IntArray(2)
+            editor.getLocationOnScreen(position)
+            inputBounds.set(position[0],position[1],position[0]+editor.width,position[1]+editor.height)
+        }
+        touch(inputBounds)
+        await("show action restored by tapping the same field") {
+            controlNotification()?.actions?.firstOrNull()?.title?.toString()=="キーボードを表示"
+        }
+        assertEquals(0,imeHeight())
+        controlNotification()!!.actions.first().actionIntent.send()
+        await("restored action can display the keyboard") { imeHeight()>300 }
+    }
     @Test fun controlNotificationContainsNoInputAndCanBeDisabledIndependently() {
         enableControlNotification(); letters("NIHONGO")
         val notification=controlNotification()!!
