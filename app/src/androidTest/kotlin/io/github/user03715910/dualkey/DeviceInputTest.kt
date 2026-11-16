@@ -672,11 +672,12 @@ class DeviceInputTest {
     }
     @Test fun deferredNotificationChoiceAppliesToTheNextEditorAndDoesNotOpenAnotherActivity() {
         enableControlNotification()
+        val toggle=controlNotification()!!.actions.first().actionIntent
         main { activity.findViewById<View>(R.id.nav_settings).performClick() }
         await("no editor focused") { !ImeControl.state.value.editorActive }
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
         for (expected in listOf(DisplayMode.FULL,DisplayMode.HIDDEN,DisplayMode.FULL)) {
-            controlNotification()!!.actions.first().actionIntent.send()
+            toggle.send()
             await("deferred $expected") { app.settings.state.value.pendingNotificationDisplay==expected }
         }
         assertTrue(activity.hasWindowFocus())
@@ -688,6 +689,40 @@ class DeviceInputTest {
         await("deferred full mode") { ImeControl.state.value.editorActive && imeHeight()>300 }
         await("deferred choice consumed") { app.settings.state.value.pendingNotificationDisplay==null }
         letters("KA"); assertEquals("か",inputText())
+    }
+    @Test fun connectedKeyboardKeepsAnExplicitShowActionEvenWithoutAnEditor() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        org.junit.Assume.assumeTrue("Use an emulator with a hardware keyboard",app.hardwareKeyboardConnected.value)
+        enableControlNotification()
+        ImeControl.request(DisplayMode.HIDDEN)
+        await("explicit show action with the keys hidden") {
+            imeHeight()==0 && controlNotification()?.actions?.firstOrNull()?.title?.toString()=="キーボードを表示"
+        }
+
+        main { activity.findViewById<View>(R.id.nav_settings).performClick() }
+        await("show action remains without an input field") {
+            !ImeControl.state.value.editorActive && controlNotification()?.actions?.firstOrNull()?.title?.toString()=="キーボードを表示"
+        }
+        val show=controlNotification()!!.actions.first().actionIntent
+        show.send()
+        await("explicit display queued") { ImeControl.requests.value?.mode==DisplayMode.FULL &&
+            app.settings.state.value.pendingNotificationDisplay==DisplayMode.FULL }
+        val firstRequest=ImeControl.requests.value!!.id
+        show.send()
+        await("repeat show broadcast handled") {
+            ImeControl.requests.value?.let { it.notification && it.mode==DisplayMode.FULL && it.id>firstRequest }==true
+        }
+        assertEquals(DisplayMode.FULL,app.settings.state.value.pendingNotificationDisplay)
+        assertEquals(0,imeHeight())
+
+        main { activity.findViewById<View>(R.id.nav_home).performClick() }
+        await("home editor exists") { var exists=false; main { exists=activity.findViewById<View>(android.R.id.content).findViewWithTag<View>("test_input")!=null }; exists }
+        main { editor=activity.findViewById<View>(android.R.id.content).findViewWithTag("test_input"); editor.requestFocus() }
+        await("keyboard restored in the next editor") { imeHeight()>300 && ImeControl.state.value.keyboardVisible }
+        await("explicit show action replaced") { controlNotification()?.actions?.firstOrNull()?.title?.toString()=="表示／非表示を切替" }
+        show.send()
+        SystemClock.sleep(300)
+        assertTrue("A delayed show action does not hide the visible keys",imeHeight()>300)
     }
     @Test fun controlNotificationContainsNoInputAndCanBeDisabledIndependently() {
         enableControlNotification(); letters("NIHONGO")

@@ -1,6 +1,9 @@
 package io.github.user03715910.dualkey
 
 import android.app.Application
+import android.content.res.Configuration
+import android.hardware.input.InputManager
+import android.view.InputDevice
 import io.github.user03715910.dualkey.data.SettingsStore
 import io.github.user03715910.dualkey.data.LearningStore
 import io.github.user03715910.dualkey.conversion.JapaneseDictionary
@@ -17,8 +20,11 @@ import android.os.Looper
 import android.provider.Settings
 import java.util.concurrent.atomic.AtomicLong
 
-class DualKeyApp : Application() {
+class DualKeyApp : Application(), InputManager.InputDeviceListener {
     val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
+    private val inputManager by lazy { getSystemService(InputManager::class.java) }
+    private val connectedKeyboard = MutableStateFlow(false)
+    val hardwareKeyboardConnected = connectedKeyboard.asStateFlow()
     lateinit var settings: SettingsStore; private set
     val updates by lazy { UpdateRepository(this) }
     val clipboardMedia by lazy { io.github.user03715910.dualkey.data.ClipboardMedia(this,scope) }
@@ -37,12 +43,16 @@ class DualKeyApp : Application() {
         symbols=io.github.user03715910.dualkey.conversion.SymbolDictionary(this,scope)
         expressions=io.github.user03715910.dualkey.conversion.ExpressionDictionary(this,scope)
         clipboard=io.github.user03715910.dualkey.data.ClipboardHistoryStore(this,scope,settings)
+        inputManager.registerInputDeviceListener(this,Handler(Looper.getMainLooper()))
+        refreshHardwareKeyboard()
         clipboardMedia // remove expired staging from an earlier process
         scope.launch { clipboard.clearEvents.filter { it!=0L }.collect { clipboardMedia.clearPinned() } }
         scope.launch { settings.awaitLoaded(); settings.state.map { it.autoCheck }.distinctUntilChanged().collect { UpdateScheduler.schedule(this@DualKeyApp, it) } }
         scope.launch {
             settings.awaitLoaded()
-            combine(settings.state,ImeControl.state) { s,v -> Triple(s.visibilityNotification,s.pendingNotificationDisplay,v) }
+            combine(settings.state,ImeControl.state,hardwareKeyboardConnected) { s,v,connected ->
+                Triple(s.visibilityNotification,s.pendingNotificationDisplay,v to connected)
+            }
                 .distinctUntilChanged().collect { (enabled,_,_) ->
                     if (!enabled) ImeControl.requests.value?.takeIf { it.notification }?.let { ImeControl.requests.compareAndSet(it,null) }
                     KeyboardVisibilityNotification.refresh(this@DualKeyApp)
@@ -52,6 +62,23 @@ class DualKeyApp : Application() {
             object: ContentObserver(Handler(Looper.getMainLooper())) {
                 override fun onChange(selfChange: Boolean) { KeyboardVisibilityNotification.refresh(this@DualKeyApp) }
             })
+    }
+
+    override fun onInputDeviceAdded(deviceId: Int) = refreshHardwareKeyboard()
+    override fun onInputDeviceRemoved(deviceId: Int) = refreshHardwareKeyboard()
+    override fun onInputDeviceChanged(deviceId: Int) = refreshHardwareKeyboard()
+    override fun onConfigurationChanged(newConfig: Configuration) {
+        super.onConfigurationChanged(newConfig)
+        refreshHardwareKeyboard()
+    }
+
+    private fun refreshHardwareKeyboard() {
+        val config=resources.configuration
+        connectedKeyboard.value=inputManager.inputDeviceIds.any { id ->
+            val device=inputManager.getInputDevice(id) ?: return@any false
+            !device.isVirtual && device.keyboardType==InputDevice.KEYBOARD_TYPE_ALPHABETIC &&
+                device.supportsSource(InputDevice.SOURCE_KEYBOARD)
+        } || (config.keyboard==Configuration.KEYBOARD_QWERTY && config.hardKeyboardHidden==Configuration.HARDKEYBOARDHIDDEN_NO)
     }
 }
 

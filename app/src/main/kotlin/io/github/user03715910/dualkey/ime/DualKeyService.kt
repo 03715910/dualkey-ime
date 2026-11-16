@@ -4,7 +4,6 @@ import android.content.*
 import android.content.res.Configuration
 import android.database.ContentObserver
 import android.net.Uri
-import android.hardware.input.InputManager
 import android.inputmethodservice.InputMethodService
 import android.media.AudioManager
 import android.os.*
@@ -23,7 +22,7 @@ import io.github.user03715910.dualkey.translation.TranslationEngine
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 
-class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
+class DualKeyService : InputMethodService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
     private val app get() = application as DualKeyApp
     private val settings get() = app.settings.state.value
@@ -100,7 +99,6 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
     private var variant: CompositionVariant? = null
     private var variantJob: Job? = null
     private val consumed = mutableSetOf<Int>()
-    private lateinit var inputManager: InputManager
     private var inputStarted = false
     private var lastPolicy: HardwarePolicy? = null
     private val clipboardManager by lazy { getSystemService(ClipboardManager::class.java) }
@@ -146,8 +144,6 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
 
     override fun onCreate() {
         super.onCreate()
-        inputManager = getSystemService(InputManager::class.java)
-        inputManager.registerInputDeviceListener(this, Handler(Looper.getMainLooper()))
         clipboardManager.addPrimaryClipChangedListener(clipboardListener)
         scope.launch { app.symbols.entries.collect { refreshCandidates() } }
         scope.launch { app.expressions.entries.collect { refreshCandidates() } }
@@ -177,6 +173,7 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             if (clipboardShowing) clipboardHistory()
         } }
         scope.launch { ImeControl.requests.collect { request -> if (request!=null && hasEditor()) applyDisplayRequest(request) } }
+        scope.launch { app.hardwareKeyboardConnected.collect { if (it!=visibility.connected) hardwareChanged() } }
     }
     override fun onCreateInputView(): View = KeyboardUi(this,::onScreenKey,::feedback).also { ui=it; it.dictionaryStatus(app.japaneseDictionary.message.value); rebuild(); refreshCandidates(); updateNavigationAppearance() }.root
     override fun onWindowShown() {
@@ -413,7 +410,6 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         stopScreenshot()
         clipboardManager.removePrimaryClipChangedListener(clipboardListener)
         hardwarePanel.dismiss()
-        inputManager.unregisterInputDeviceListener(this)
         translator.close(); scope.cancel(); ImeControl.inputActive=false; inputStarted=false; windowShown=false; publishVisibility()
         super.onDestroy()
     }
@@ -433,9 +429,6 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
             if (windowShown) showHardwareCandidates()
         } finally { changingConfiguration=false }
     }
-    override fun onInputDeviceAdded(deviceId: Int) = hardwareChanged()
-    override fun onInputDeviceRemoved(deviceId: Int) = hardwareChanged()
-    override fun onInputDeviceChanged(deviceId: Int) = hardwareChanged()
     private fun hardwareChanged() {
         val connected=visibility.connected
         detectHardware(); rebuild()
@@ -443,11 +436,8 @@ class DualKeyService : InputMethodService(), InputManager.InputDeviceListener {
         applyVisibility(connected && !visibility.connected && hasEditor() && editorRequested)
     }
     private fun detectHardware() {
-        val connected = inputManager.inputDeviceIds.any { id -> inputManager.getInputDevice(id)?.let {
-            !it.isVirtual && it.keyboardType == InputDevice.KEYBOARD_TYPE_ALPHABETIC && it.supportsSource(InputDevice.SOURCE_KEYBOARD)
-        } == true } || (resources.configuration.keyboard == Configuration.KEYBOARD_QWERTY && resources.configuration.hardKeyboardHidden == Configuration.HARDKEYBOARDHIDDEN_NO)
         val remembered = if (settings.rememberManual) runCatching { DisplayMode.valueOf(settings.savedManual ?: "") }.getOrNull() else null
-        visibility.connectionChanged(connected,remembered)
+        visibility.connectionChanged(app.hardwareKeyboardConnected.value,remembered)
     }
     private fun chooseDisplay(mode: DisplayMode) {
         displayEpoch++; displayRetry?.cancel()

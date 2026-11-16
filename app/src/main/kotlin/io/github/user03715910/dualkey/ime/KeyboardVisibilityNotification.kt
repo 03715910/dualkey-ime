@@ -18,6 +18,7 @@ object KeyboardVisibilityNotification {
     const val CHANNEL="keyboard_visibility"
     const val ID=30
     const val TOGGLE="io.github.user03715910.dualkey.TOGGLE_VISIBILITY"
+    const val SHOW="io.github.user03715910.dualkey.SHOW_KEYBOARD"
     fun selected(context: Context)=Settings.Secure.getString(context.contentResolver,Settings.Secure.DEFAULT_INPUT_METHOD)
         ?.substringBefore('/')==context.packageName
     fun ensureChannel(context: Context) {
@@ -41,20 +42,23 @@ object KeyboardVisibilityNotification {
         if (Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) return
         ensureChannel(context)
         val state=ImeControl.state.value
+        val showOnly=app.hardwareKeyboardConnected.value && !state.keyboardVisible
         val pending=app.settings.state.value.pendingNotificationDisplay
         val message=when {
-            pending!=null && !state.editorActive -> "次の入力欄で${if (pending==DisplayMode.HIDDEN) "非表示" else "表示"}にします"
+            pending==DisplayMode.FULL && !state.editorActive -> "次の入力欄で画面キーボードを表示します"
+            showOnly -> "画面キーボードを非表示中"
+            pending==DisplayMode.HIDDEN && !state.editorActive -> "次の入力欄で画面キーボードを隠します"
             !state.editorActive -> "入力欄がないときは、次の入力欄で反映します"
             state.keyboardVisible -> "画面キーボードを表示中・タップで隠す"
             else -> "画面キーボードを非表示中・タップで表示"
         }
-        val action=PendingIntent.getBroadcast(context,30,Intent(context,KeyboardVisibilityReceiver::class.java).setAction(TOGGLE),
+        val action=PendingIntent.getBroadcast(context,ID,Intent(context,KeyboardVisibilityReceiver::class.java).setAction(if (showOnly) SHOW else TOGGLE),
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
         val notification=NotificationCompat.Builder(context,CHANNEL).setSmallIcon(R.drawable.ic_dualkey)
             .setContentTitle("DualKey：キーボード表示切替").setContentText(message)
             .setContentIntent(action).setOngoing(true).setAutoCancel(false).setOnlyAlertOnce(true).setShowWhen(false)
             .setCategory(NotificationCompat.CATEGORY_SERVICE).setVisibility(NotificationCompat.VISIBILITY_PRIVATE)
-            .addAction(NotificationCompat.Action.Builder(R.drawable.ic_dualkey,"表示／非表示を切替",action)
+            .addAction(NotificationCompat.Action.Builder(R.drawable.ic_dualkey,if (showOnly) "キーボードを表示" else "表示／非表示を切替",action)
                 .setShowsUserInterface(false).setAuthenticationRequired(true).build()).build()
         runCatching { manager.notify(ID,notification) }
     }
@@ -62,7 +66,9 @@ object KeyboardVisibilityNotification {
 
 class KeyboardVisibilityReceiver: BroadcastReceiver() {
     override fun onReceive(context: Context,intent: Intent) {
-        if (intent.action!=KeyboardVisibilityNotification.TOGGLE || context.getSystemService(KeyguardManager::class.java).isKeyguardLocked) return
+        val showOnly=intent.action==KeyboardVisibilityNotification.SHOW
+        if ((!showOnly && intent.action!=KeyboardVisibilityNotification.TOGGLE) ||
+            context.getSystemService(KeyguardManager::class.java).isKeyguardLocked) return
         val result=goAsync()
         val app=context.applicationContext as DualKeyApp
         app.scope.launch {
@@ -70,7 +76,9 @@ class KeyboardVisibilityReceiver: BroadcastReceiver() {
                 withTimeout(5000) {
                     app.settings.awaitLoaded()
                     if (!KeyboardVisibilityNotification.selected(context)) return@withTimeout
-                    val target=app.settings.toggleNotificationDisplay(ImeControl.state.value.keyboardVisible) ?: return@withTimeout
+                    val visible=ImeControl.state.value.keyboardVisible
+                    if (showOnly && visible) return@withTimeout
+                    val target=app.settings.queueNotificationDisplay(visible,DisplayMode.FULL.takeIf { showOnly }) ?: return@withTimeout
                     ImeControl.request(target,notification=true)
                     KeyboardVisibilityNotification.refresh(context)
                 }

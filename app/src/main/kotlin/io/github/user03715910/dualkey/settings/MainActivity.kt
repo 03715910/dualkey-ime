@@ -338,7 +338,7 @@ class MainActivity : AppCompatActivity() {
                 if (enabled) requestNotificationPermission()
                 else lifecycleScope.launch { app.settings.clearNotificationDisplay() }
             }
-            text("通知の「表示／非表示を切替」を押すだけで切り替えます。別の画面を開かず、元の入力欄で続けられます。通知パネルが残る場合は閉じてください。入力欄がないときは、次にタップする入力欄で反映します。")
+            text("物理キーボード接続中に画面キーボードを隠すと、通知に「キーボードを表示」が出ます。入力欄がないときは、次にタップする入力欄で表示します。")
             button("通知の許可・設定") { KeyboardVisibilityNotification.ensureChannel(this); requestNotificationPermission(true) }
             if (!KeyboardVisibilityNotification.permitted(this)) text("表示切替の通知を使うには、Androidの通知を許可してください。")
             text("この通知はアプリ更新の通知とは別にON／OFFできます。入力した文章は通知へ表示しません。")

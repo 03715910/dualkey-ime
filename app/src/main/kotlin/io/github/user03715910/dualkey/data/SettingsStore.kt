@@ -116,13 +116,13 @@ class SettingsStore(private val context: Context, scope: CoroutineScope) {
         require(value.valid)
         context.store.edit { it[Prefs.displayShortcutKey]=value.key; it[Prefs.displayShortcutModifiers]=value.modifiers }
     }
-    suspend fun toggleNotificationDisplay(currentlyVisible: Boolean): DisplayMode? {
+    suspend fun queueNotificationDisplay(currentlyVisible: Boolean, requestedMode: DisplayMode?=null): DisplayMode? {
         var target: DisplayMode?=null
         context.store.edit {
             if (it[Prefs.visibilityNotification]==false) return@edit
             val pending=runCatching { DisplayMode.valueOf(it[Prefs.pendingNotificationDisplay] ?: "") }.getOrNull()
             val visible=pending?.let { mode -> mode!=DisplayMode.HIDDEN } ?: currentlyVisible
-            target=if (visible) DisplayMode.HIDDEN else DisplayMode.FULL
+            target=requestedMode ?: if (visible) DisplayMode.HIDDEN else DisplayMode.FULL
             it[Prefs.pendingNotificationDisplay]=target!!.name
         }
         return target
