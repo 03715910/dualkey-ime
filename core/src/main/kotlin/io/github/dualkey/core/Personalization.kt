@@ -5,13 +5,14 @@ import java.text.Normalizer
 data class LearnedChoice(val reading: String, val text: String, val count: Int, val lastUsed: Long)
 
 object Personalization {
-    private val betweenWidePunctuation = Regex("[^！？]+")
+    internal const val literalPunctuation = "！？…（）"
+    private val betweenLiteralPunctuation = Regex("[^$literalPunctuation]+")
 
     fun normalize(reading: String): String = Normalizer.normalize(reading,Normalizer.Form.NFKC)
         .map { if (it in 'ァ'..'ヶ') it-0x60 else it }.joinToString("")
 
     internal fun normalizeComposition(reading: String): String =
-        if ('！' in reading || '？' in reading) betweenWidePunctuation.replace(reading) { normalize(it.value) }
+        if (reading.any { it in literalPunctuation }) betweenLiteralPunctuation.replace(reading) { normalize(it.value) }
         else normalize(reading)
 
     fun valid(reading: String,text: String): Boolean = reading.length in 1..80 && text.length in 1..160 &&
@@ -44,7 +45,16 @@ object Personalization {
             val enriched = candidate.withEvidence(listOfNotNull(learned)).let {
                 if (continuation == null) it else it.withAlternative(continuation)
             }
-            val boost = (shift + if (continuation != null) 1 else 0).coerceAtMost(4)
+            // A repeatedly chosen spelling after the same confirmed text is
+            // stronger evidence than a generic continuation suggestion.
+            val contextShift = if (continuation == null) 0 else {
+                val pair = continuation.evidence?.continuation
+                    ?: continuation.alternatives.firstNotNullOfOrNull { it.continuation?.takeIf { pair -> pair.text == candidate.text } }
+                if (pair == null) 1 else strength(
+                    LearnedChoice(pair.reading, pair.text, pair.count, pair.lastUsed), now,
+                ).coerceIn(1, 3)
+            }
+            val boost = (shift + contextShift).coerceAtMost(4)
             (index * 2 - boost * 2 - if (boost > 0) 1 else 0) to enriched
         }.sortedBy { it.first }.map { it.second }
     }

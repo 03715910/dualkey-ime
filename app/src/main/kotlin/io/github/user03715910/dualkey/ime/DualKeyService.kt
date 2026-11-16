@@ -49,6 +49,7 @@ class DualKeyService : InputMethodService() {
     }
     private var hardwareCandidates=false
     private var hardwareComposition=false
+    private val hardwarePredictionOpen get() = hardwareCandidates && !converting && !composer.isEmpty
     private var hardwareMode=CandidateMode.ALL
     private var candidateHostRequested=false
     private var candidateHostRetry: Job?=null
@@ -508,11 +509,11 @@ class DualKeyService : InputMethodService() {
         ui?.googleComposition(null)
         ui?.candidates(CandidateLists(),-1,{})
     }
-    private fun resetConversion() { selected=-1; converting=false }
+    private fun resetConversion() { selected=-1; converting=false; hardwareCandidates=false }
     private fun refreshCandidates() {
         continuationCandidates=false
         if (japaneseConversionAllowed && !english && !composer.isEmpty &&
-            (converting || settings.japanesePrediction && !hardwareComposition)) {
+            (converting || settings.japanesePrediction && (!hardwareComposition || hardwarePredictionOpen))) {
             if (requestedReading!=composer.reading) { requestedReading=composer.reading; requestedLimit=maxOf(64,settings.candidateCount) }
             val query=CandidateQuery(composer.reading,!converting && predictionsAllowed && settings.japanesePrediction,
                 maxOf(settings.candidateCount,requestedLimit),settings.dictionary,conversion,
@@ -596,19 +597,21 @@ class DualKeyService : InputMethodService() {
         candidateQuery?.let { it.limit<10000 && candidateRecords.size>=it.limit }==true
 
     private fun chooseHardwareMode(mode: CandidateMode) {
-        if (!hardwareCandidates || !hasEditor() || !converting || mode==hardwareMode) return
+        if (!hardwareCandidates || !hasEditor() || continuationCandidates || mode==hardwareMode) return
         hardwareMode=mode
         selected=-1
         setCandidateRecords(candidateLists)
-        if (candidates.isNotEmpty()) selected=0
-        syncComposition()
+        if (converting) {
+            if (candidates.isNotEmpty()) selected=0
+            syncComposition()
+        } else showCandidates()
     }
 
     private fun showHardwareCandidates() {
         val needsCandidateHost=visibility.mode==DisplayMode.HIDDEN || !editorRequested
         if (!hardwareCandidates || !hasEditor() || sensitive || english || !japaneseConversionAllowed ||
             (continuationCandidates && selected !in candidates.indices) ||
-            (!converting && !continuationCandidates) || candidateLists.all.isEmpty()) {
+            (!converting && !continuationCandidates && !hardwarePredictionOpen) || candidateLists.all.isEmpty()) {
             val thinHost=needsCandidateHost && settings.hideImeCaption
             closeHardwarePanel(releaseHost=thinHost && (!hardwareCandidates || !hasEditor() || !candidateLoading))
             return
@@ -626,7 +629,11 @@ class DualKeyService : InputMethodService() {
         }
         val host=window?.window?.decorView ?: return
         val top=visibleKeyboard()?.let { view -> IntArray(2).also(view::getLocationOnScreen)[1] }
-        val title=if (continuationCandidates) "続きの予測" else "変換候補"
+        val title=when {
+            continuationCandidates -> "続きの予測"
+            hardwarePredictionOpen -> "入力中の予測"
+            else -> "変換候補"
+        }
         hardwarePanel.show(host,candidateRecords,selected,title,hardwareMode.takeUnless { continuationCandidates },top,
             needsCandidateHost && settings.hideImeCaption,canLoadMoreHardwareCandidates())
     }
@@ -867,6 +874,7 @@ class DualKeyService : InputMethodService() {
             finishEnglish(); committedTail=null; resetConversion(); currentInputConnection?.commitText("\n",1); refreshCandidates(); return
         }
         if (continuationCandidates && selected in candidates.indices) { commitCandidate(selected); return }
+        if (physical && hardwarePredictionOpen && selected in candidates.indices) { commitCandidate(selected); return }
         if (!composer.isEmpty) { commitComposition(true); return }
         committedTail=null; finishEnglish(); refreshCandidates()
         val behavior=if (physical) settings.physicalEnter else settings.screenEnter
@@ -887,6 +895,7 @@ class DualKeyService : InputMethodService() {
 
     private fun delete() {
         invalidateTranslation()
+        if (hardwarePredictionOpen) resetConversion()
         if (variant!=null) { resetVariant(); resetConversion(); syncComposition(); return }
         if (converting) { resetConversion(); syncComposition(); return }
         if (!composer.isEmpty) {
@@ -1417,9 +1426,16 @@ class DualKeyService : InputMethodService() {
                 }
             }
             keyCode==KeyEvent.KEYCODE_TAB && !english && !sensitive && candidates.isNotEmpty() &&
-                (converting || continuationCandidates) -> {
-                // Only take Tab when there are actual choices. Ordinary form navigation is untouched.
+                (converting || continuationCandidates || hardwarePredictionOpen) -> {
                 stepHardwareCandidate(if (event.isShiftPressed) -1 else 1)
+            }
+            keyCode==KeyEvent.KEYCODE_TAB && !event.isShiftPressed && hardwareComposition && !composer.isEmpty &&
+                !english && !converting && variant==null && japaneseConversionAllowed &&
+                predictionsAllowed && settings.japanesePrediction -> {
+                // The first Tab opens suggestions without changing the composing text.
+                // Tab with no composition remains ordinary form navigation.
+                hardwareCandidates=true
+                refreshCandidates()
             }
             keyCode==KeyEvent.KEYCODE_ENTER || keyCode==KeyEvent.KEYCODE_NUMPAD_ENTER -> enter(true,event.isShiftPressed)
             keyCode==KeyEvent.KEYCODE_DEL -> {
@@ -1432,18 +1448,22 @@ class DualKeyService : InputMethodService() {
             }
             keyCode==KeyEvent.KEYCODE_ESCAPE && (continuationCandidates || !composer.isEmpty || englishWord.isNotEmpty()) -> {
                 invalidateTranslation()
+                val closePrediction=hardwarePredictionOpen
                 hardwareCandidates=false
                 if (composer.isEmpty && englishWord.isEmpty()) { committedTail=null; resetConversion(); refreshCandidates() }
                 else if (variant!=null) { resetVariant(); resetConversion(); syncComposition() }
-                else if (converting) { resetConversion(); syncComposition() }
+                else if (converting || closePrediction) { resetConversion(); syncComposition() }
                 else { composer.clear(); englishWord=""; currentInputConnection?.setComposingText("",1); currentInputConnection?.finishComposingText(); refreshCandidates() }
             }
             keyCode in setOf(KeyEvent.KEYCODE_DPAD_LEFT,KeyEvent.KEYCODE_DPAD_RIGHT,KeyEvent.KEYCODE_DPAD_UP,KeyEvent.KEYCODE_DPAD_DOWN) -> {
                 val vertical=keyCode==KeyEvent.KEYCODE_DPAD_UP || keyCode==KeyEvent.KEYCODE_DPAD_DOWN
                 val chooseContinuation=continuationCandidates && (visibility.mode!=DisplayMode.HIDDEN || hardwareCandidates) &&
                     (selected>=0 || vertical)
-                if (candidates.isNotEmpty() && (converting || chooseContinuation)) {
+                if (candidates.isNotEmpty() && (converting || chooseContinuation || hardwarePredictionOpen && vertical)) {
                     stepHardwareCandidate(if (keyCode==KeyEvent.KEYCODE_DPAD_LEFT || keyCode==KeyEvent.KEYCODE_DPAD_UP) -1 else 1)
+                } else if (hardwarePredictionOpen && vertical && candidateLoading) {
+                    // A quick Down while suggestions are being computed should not commit the kana.
+                    handled=true
                 } else { commitComposition(); committedTail=null; finishEnglish(); refreshCandidates(); handled=false }
             }
             else -> {

@@ -121,13 +121,25 @@ object JapaneseCandidates {
         val fallback = if (matched.isEmpty() && trusted.isEmpty() || key.any { !it.isLetter() && it != 'ー' })
             weak.take(5) else emptyList()
         val prefix = mergeCandidates(wholePrefixes.take(4) + tails.take(4)).sortedWith(byCost)
-        val leadingPredictions = if (matched.isEmpty() && trusted.isEmpty()) prefix.take(4) else prefix.take(2)
+        val leadingPredictions = if (matched.isEmpty() && trusted.isEmpty()) prefix.take(4)
+            else prefix.filter { (it.evidence?.addedReadingLength ?: 0) <= 3 }.take(2)
+        // When the exact spelling would require splitting an almost complete
+        // word, reserve one slot for a competitive one-kana dictionary match.
+        val bestDirect = matched.firstOrNull()
+        val nearComplete = if (prediction && key.length >= 4 && trusted.isEmpty() && exactAlias.isEmpty() &&
+            group(CandidateReason.DICTIONARY_EXACT).isEmpty()) {
+            (wholePrefixes.take(4) + tails.take(4)).asSequence().filter {
+                it.evidence?.addedReadingLength == 1 && it.evidence.cost != null &&
+                    (bestDirect == null || rankCost(it) <= rankCost(bestDirect))
+            }.minWithOrNull(byCost)
+        } else null
         // Round-robin the extended word lists in small groups after the first
         // screenful, so hundreds of exact kanji cannot bury valid completions.
         val followups = interleave(direct.drop(5), wholePrefixes, tails)
         val all = mergeCandidates(buildList {
             addAll(leading)
             addAll(learnedPrefixes)
+            if (nearComplete != null) add(nearComplete)
             addAll(head.drop(2))
             addAll(fallback)
             addAll(contextualPrefixes.take(2))

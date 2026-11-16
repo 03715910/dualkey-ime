@@ -74,6 +74,63 @@ class JapaneseDictionaryTest {
         }
         assertEquals("あいおえう".repeat(33), words("あいおえう".repeat(33)).first())
     }
+    @Test fun fullWidthSentenceMarksDoNotDemoteOtherwiseNaturalClauses() {
+        val examples = mapOf(
+            "こちらはかんりょうしていますか？" to "こちらは完了していますか？",
+            "ですがこちらはかんりょうしていますか？" to "ですがこちらは完了していますか？",
+            "にまにあいますか？" to "に間に合いますか？",
+            "もおねがいできますか？" to "もお願いできますか？",
+            "きょうのことはわすれないでね！" to "今日のことは忘れないでね！",
+            "ごめん、ちょっとまってくれる？" to "ごめん、ちょっと待ってくれる？",
+        )
+        for ((reading, expected) in examples) {
+            val candidates = JapaneseCandidates.generate(reading, false, 64, engine)
+            assertEquals(reading, expected, candidates.all.first().text)
+            assertEquals(reading, expected, candidates.exact.first().text)
+        }
+        assertEquals("でお願いします", words("でおねがいします").first())
+        assertEquals("に間に合いますか?", words("にまにあいますか?").first())
+    }
+    @Test fun literalSymbolsInsideAReadingDoNotDemoteTheConvertedSentence() {
+        val examples = mapOf(
+            "こちらはかんりょうしていますか…" to "こちらは完了していますか…",
+            "ですが、こちらはかんりょうしていますか⋯" to "ですが、こちらは完了していますか⋯",
+            "このしりょう📝をあしたまでにかくにんしてください" to "この資料📝を明日までに確認してください",
+            "では（きんようび）までにおねがいします。" to "では（金曜日）までにお願いします。",
+            "ではこのあと かいぎをはじめます" to "ではこのあと 会議を始めます",
+        )
+        for ((reading, expected) in examples) {
+            for (prediction in listOf(false, true)) {
+                val candidates = JapaneseCandidates.generate(reading, prediction, 64, engine)
+                assertEquals(reading, expected, candidates.all.first().text)
+                assertEquals(reading, expected, candidates.exact.first().text)
+                assertTrue(reading, candidates.all.any { it.text == reading })
+                assertTrue(reading, candidates.all.any { it.text == SemanticConversion.katakana(reading) })
+            }
+        }
+    }
+    @Test fun aNearCompleteDictionaryWordIsVisibleWithoutChangingExplicitConversion() {
+        val reading = "しんかんせ"
+        val prediction = engine.candidates(reading, true, 64)
+        assertTrue(prediction.take(3).any { it.text == "新幹線" && it.reading == "しんかんせん" })
+        assertTrue(engine.candidates(reading, false, 64).none { it.text == "新幹線" })
+        val full = engine.candidates("わたしは", true, 64)
+        assertTrue(full.take(7).none { it.evidence?.addedReadingLength ?: 0 > 3 })
+        assertTrue(full.any { it.text == "私は貝になりたい" })
+    }
+
+    @Test fun repeatedConfirmedContextRanksTheMatchingHomophoneWithoutChangingGeneralOrder() {
+        val reading = "かみ"
+        val now = 1L
+        val context = Candidate("白い", "しろい")
+        fun place(count: Int, previous: Candidate? = context) = JapaneseCandidates.generate(reading, false, 64, engine,
+            continuations = listOf(LearnedContinuation(context.text, "紙", reading, count, now)),
+            context = previous, now = now).all.indexOfFirst { it.text == "紙" } + 1
+        assertEquals(place(0), place(1))
+        assertTrue(place(0) > 1)
+        assertEquals(1, place(8))
+        assertEquals(place(0), place(8, Candidate("長い", "ながい")))
+    }
     @Test fun userDictionaryLiteralsAndNormalization() {
         val custom = DictionaryConversionEngine(lexicon) { mapOf("でゅある" to listOf("DualKey")) }
         assertEquals("DualKey", custom.candidates("でゅある", false, 30).first().text)

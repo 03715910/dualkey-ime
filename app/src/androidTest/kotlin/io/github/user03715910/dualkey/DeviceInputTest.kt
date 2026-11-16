@@ -939,6 +939,8 @@ class DeviceInputTest {
             await("keys hidden for learned prediction") { imeHeight()==0 }
             key(KeyEvent.KEYCODE_ESCAPE)
             letters("TEN")
+            assertNull(hardwareNode("物理キーボードの候補一覧"))
+            key(KeyEvent.KEYCODE_TAB)
             await("hardware panel uses learned prefix") { hardwareNode("物理候補：⋯")?.isVisibleToUser==true }
             assertEquals(0,imeHeight())
             ImeControl.request(DisplayMode.FULL)
@@ -984,8 +986,38 @@ class DeviceInputTest {
         await("floating candidates while keyboard hidden") { hardwareNode("物理候補：今日")!=null }
         assertCandidateOnly(); captureHardware("conversion-hidden")
         touch(Rect().also { hardwareNode("物理候補：今日")!!.getBoundsInScreen(it) })
-        instrumentation.waitForIdleSync(); assertEquals("今日",inputText())
-        assertNull(hardwareNode("物理キーボードの候補一覧")); assertCandidateOnly()
+        await("tapped candidate confirmed and window removed") {
+            inputText()=="今日" && hardwareNode("物理キーボードの候補一覧")==null
+        }
+        assertCandidateOnly()
+    }
+    @Test fun tabOpensExplicitHardwarePredictionsWithoutChangingTheReading() {
+        ImeControl.request(DisplayMode.HIDDEN)
+        await("IME hidden") { imeHeight()==0 }
+        letters("OHA")
+        assertEquals("おは",inputText())
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        key(KeyEvent.KEYCODE_TAB)
+        await("on-demand prediction") { hardwareNode("物理候補：おはよう")?.isVisibleToUser==true }
+        assertEquals("おは",inputText())
+        assertCandidateOnly()
+        key(KeyEvent.KEYCODE_ESCAPE)
+        await("prediction dismissed") { hardwareNode("物理キーボードの候補一覧")==null }
+        assertEquals("おは",inputText())
+
+        key(KeyEvent.KEYCODE_TAB)
+        await("prediction reopened") { hardwareNode("物理候補：おはよう")?.isVisibleToUser==true }
+        fun greetingSelected() = hardwareNode("物理候補：おはよう")?.let { it.refresh() && it.isSelected } == true
+        for (index in 0..4) {
+            if (greetingSelected()) break
+            key(KeyEvent.KEYCODE_DPAD_DOWN)
+            // Wait for the service to move before reading the accessibility selection again.
+            await("prediction selection moved to index $index") { "selected=$index," in diagnostic() }
+        }
+        await("greeting selected") { greetingSelected() }
+        assertEquals("おは",inputText())
+        key(KeyEvent.KEYCODE_ENTER)
+        await("prediction committed") { inputText()=="おはよう" && hardwareNode("物理キーボードの候補一覧")==null }
     }
     @Test fun tabCyclesPostCommitPredictionsInHiddenModeAndShiftTabGoesBack() {
         ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
@@ -1012,7 +1044,7 @@ class DeviceInputTest {
         assertCandidateOnly()
         key(KeyEvent.KEYCODE_SPACE)
         await("conversion requested with Space") { hardwareNode("物理キーボードの候補一覧")?.isVisibleToUser==true }
-        key(KeyEvent.KEYCODE_ESCAPE)
+        key(KeyEvent.KEYCODE_DEL)
         await("conversion list closed") { hardwareNode("物理キーボードの候補一覧")==null }
         assertEquals("おは",inputText())
         key(KeyEvent.KEYCODE_ESCAPE)
@@ -1028,8 +1060,9 @@ class DeviceInputTest {
         assertEquals("2個",inputText())
         key(KeyEvent.KEYCODE_F6)
         await("emoji mode") { hardwareNode("物理候補：😊")?.isVisibleToUser==true }
-        val face=Rect().also(hardwareNode("物理候補の種類：顔文字")!!::getBoundsInScreen)
-        touch(face)
+        await("face tab activated") {
+            hardwareNode("物理候補の種類：顔文字")?.performAction(AccessibilityNodeInfo.ACTION_CLICK)==true
+        }
         await("face mode selects its first choice") {
             hardwareNode("物理候補の種類：顔文字")?.isSelected==true && inputText()=="(^_^)"
         }
@@ -1056,6 +1089,31 @@ class DeviceInputTest {
         await("new acknowledgement faces") { hardwareNode("物理候補：(｀･ω･´)ゞ")?.isVisibleToUser==true }
         key(KeyEvent.KEYCODE_ENTER)
         assertEquals("の記号Windows(｀･ω･´)ゞ",inputText())
+    }
+
+    @Test fun conversionKeepsTheParticleAfterAlreadyConfirmedText() {
+        resetPunctuationEditor("こちら")
+        letters("DEONEGAISHIMASU")
+        key(KeyEvent.KEYCODE_SPACE)
+        await("particle and polite ending remain intact") { inputText()=="こちらでお願いします" }
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("こちらでお願いします",inputText())
+
+        resetPunctuationEditor("締切")
+        letters("NIMANIAIMASUKA")
+        key(KeyEvent.KEYCODE_SLASH,KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_SPACE)
+        await("sentence punctuation keeps the normal kanji choice") { inputText()=="締切に間に合いますか？" }
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("締切に間に合いますか？",inputText())
+
+        resetPunctuationEditor("指示を出したのですが")
+        letters("KOCHIRAHAKANRYOUSHITEIMASUKA")
+        key(KeyEvent.KEYCODE_SLASH,KeyEvent.META_SHIFT_ON)
+        key(KeyEvent.KEYCODE_SPACE)
+        await("kanji question ranks first after confirmed text") { inputText()=="指示を出したのですがこちらは完了していますか？" }
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("指示を出したのですがこちらは完了していますか？",inputText())
     }
 
     @Test fun cryingAndEverydayKaomojiComeFromTheBundledDictionary() {
@@ -1367,7 +1425,9 @@ class DeviceInputTest {
         val samples=mutableListOf<Long>()
         repeat(3) { pass ->
             for ((romaji, candidate) in cases) {
-                main { editor.text.clear() }
+                // Start from a new editor connection so delayed selection events
+                // cannot join the previous composing span to this sample.
+                resetPunctuationEditor()
                 letters(romaji.dropLast(1))
                 val start=SystemClock.elapsedRealtimeNanos()
                 letters(romaji.takeLast(1))

@@ -29,6 +29,27 @@ class DictionaryConversionEngine(
         }.take(limit)
     }
 
+    private fun bestParents(paths: List<Path>, left: Int): List<Path> {
+        if (paths.size < 2) return paths
+        val best = ArrayList<Path>(3)
+        val costs = IntArray(3)
+        for (path in paths) {
+            val cost = path.rankCost + lexicon.transition(path.right, left)
+            val position = (0 until best.size).firstOrNull { cost < costs[it] } ?: best.size
+            if (position == 3) continue
+            val duplicate = best.indexOfFirst { it.text == path.text }
+            if (duplicate in 0 until position) continue
+            if (duplicate >= 0) best.removeAt(duplicate)
+            else if (best.size == 3) best.removeAt(2)
+            for (index in (duplicate.takeIf { it >= 0 } ?: best.size) downTo position + 1) {
+                costs[index] = costs[index - 1]
+            }
+            best.add(position, path)
+            costs[position] = cost
+        }
+        return best
+    }
+
     override fun candidates(reading: String, prediction: Boolean, limit: Int): List<Candidate> =
         JapaneseCandidates.generate(reading, prediction, limit, this).all
 
@@ -70,8 +91,18 @@ class DictionaryConversionEngine(
                     matches.add(LexiconMatch(start + key.length, LexiconWord(value, 1851, 1851, -3500 + index * 80)))
                 }
             }
-            val end = start + Character.charCount(Character.codePointAt(input, start))
-            matches.add(LexiconMatch(end, LexiconWord(input.substring(start, end), 1851, 1851, 10000), true))
+            val codePoint = Character.codePointAt(input, start)
+            val end = start + Character.charCount(codePoint)
+            val literal = input.substring(start, end)
+            val punctuationWord = if (literal[0] in Personalization.literalPunctuation) {
+                // Use the indexed punctuation's connection cost with the original spelling.
+                val normalized = Personalization.normalize(literal)
+                lexicon.exact(normalized).firstOrNull { it.text == normalized }?.copy(text = literal)
+            } else null
+            // Symbols and spaces can be carried through verbatim. They do not
+            // make the recognized Japanese on either side an incomplete reading.
+            matches.add(if (punctuationWord != null) LexiconMatch(end, punctuationWord)
+                else LexiconMatch(end, LexiconWord(literal, 1851, 1851, 10000), Character.isLetterOrDigit(codePoint)))
             // A composing span can start in the middle of a sentence. Preserve
             // hiragana function words where the dictionary attests that reading.
             val functionWordEnds = matches.asSequence().filter { match ->
@@ -81,9 +112,7 @@ class DictionaryConversionEngine(
             val parentsByLeft = HashMap<Int, List<Path>>()
             for ((finish, word, unknown) in matches) {
                 if (start == 0 && finish == input.length) continue // already collected by exact lookup
-                val parents = parentsByLeft.getOrPut(word.left) {
-                    prefixes.sortedBy { it.rankCost + lexicon.transition(it.right, word.left) }.distinctBy { it.text }.take(3)
-                }
+                val parents = parentsByLeft.getOrPut(word.left) { bestParents(prefixes, word.left) }
                 val reading = input.substring(start, finish)
                 val discount = Personalization.strength(history[reading]?.get(word.text), now) * 100
                 val startsWithParticle = start == 0 && lexicon.hasBundledPos && word.left in 268..433
