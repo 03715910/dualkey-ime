@@ -1,6 +1,21 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 32,
+    "versionName": "0.1.29",
+    "releaseDate": "2026-11-16",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.29/DualKeyIME-0.1.29.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "fd94ee8362dfef20bca8fe250999359bc1df45393bdb7c47d4a3195dc37a4c61",
+    "sizeBytes": 101787699,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "物理キーボードの接続中に「キーボードを表示」の通知を消しても、次に入力欄をタップすると通知が戻ります。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 31,
     "versionName": "0.1.28",
     "releaseDate": "2026-11-16",
