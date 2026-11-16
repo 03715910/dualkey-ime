@@ -1,16 +1,16 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 30,
-  "versionName": "0.1.27",
-  "releaseDate": "2026-11-14",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.27/DualKeyIME-0.1.27.apk",
+  "versionCode": 31,
+  "versionName": "0.1.28",
+  "releaseDate": "2026-11-16",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.28/DualKeyIME-0.1.28.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "4c65dda0d55e150373997d0333e6612533790b4c6359537a1a0b2a7355b8769b",
-  "sizeBytes": 101787435,
+  "sha256": "746f1c7e138722a2ac9694f8512d47ed09d8004f42f3f0672b8aaa29d67be97e",
+  "sizeBytes": 101787699,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "「なき」「泣き」から (T_T) や (´；ω；｀) などの顔文字を変換できます。",
-    "「号泣」「しくしく」「嬉し泣き」「安心」「心配」など、普段の会話で使える顔文字も追加しました。"
+    "物理キーボードの接続中、画面キーボードを隠している間は通知に「キーボードを表示」が出ます。",
+    "入力欄がない画面で通知を押したときは、次の入力欄で表示します。"
   ]
 }
