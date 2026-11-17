@@ -133,6 +133,43 @@ class DeviceInputTest {
         for (reading in listOf("から","ー")) assertTrue(app.symbols.entries.value[reading].orEmpty().containsAll(listOf("〜","～")))
         captureHardware("music-symbol-candidates")
     }
+    @Test fun tappingTheHalfWidthBracketCandidatePlacesTheCursorInsideAndLearnsItsWidth() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking {
+            app.learning.awaitLoaded()
+            app.settings.set(Prefs.learningEnabled,true)
+            app.settings.state.first { it.learningEnabled }
+        }
+        fun uses(text: String) = app.learning.state.value.entries.firstOrNull { it.reading=="かっこ" && it.text==text }?.count ?: 0
+        val half=uses("()")
+        val full=uses("（）")
+        try {
+            resetPunctuationEditor("前🙂後")
+            main { editor.setSelection("前🙂".length) }
+            letters("KAKKO")
+            clickLabel("()")
+            await("half-width brackets committed") { inputText()=="前🙂()後" }
+            main { assertEquals("前🙂(".length,editor.selectionStart); assertEquals(editor.selectionStart,editor.selectionEnd) }
+            letters("NAKA"); key(KeyEvent.KEYCODE_ENTER)
+            assertEquals("前🙂(なか)後",inputText())
+            await("only the chosen width is learned") { uses("()")==half+1 }
+            assertEquals(full,uses("（）"))
+        } finally { runBlocking { app.settings.set(Prefs.learningEnabled,false) } }
+    }
+    @Test fun hardwareEnterPlacesTheCursorInsideTheFullWidthBracketCandidate() {
+        resetPunctuationEditor()
+        ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
+        letters("KAKKO"); key(KeyEvent.KEYCODE_SPACE)
+        await("bracket choices visible") { hardwareNode("物理候補：（）")?.isVisibleToUser==true }
+        repeat(5) {
+            if (inputText()!="（）") key(KeyEvent.KEYCODE_DPAD_DOWN)
+        }
+        assertEquals("（）",inputText())
+        key(KeyEvent.KEYCODE_ENTER)
+        main { assertEquals(1,editor.selectionStart); assertEquals(1,editor.selectionEnd) }
+        letters("NAKA"); key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("（なか）",inputText())
+    }
     @Test fun waveCandidatesCanBeChosenForKaraAndLongVowelMark() {
         letters("KARA"); key(KeyEvent.KEYCODE_SPACE); touch(rect("一覧"))
         val wave=gridCandidate { it.substringAfter('：')=="～" }

@@ -51,12 +51,23 @@ object JapaneseCandidates {
             val ranked = Personalization.rank(base, historyForKey, now)
             // The general rank has a capped boost. Keep the most-used explicit
             // spelling first within the symbol group even if both hit that cap.
-            val preferred = ranked.mapNotNull { candidate ->
-                historyForKey[candidate.text]?.let { candidate to Personalization.recentUses(it, now) }
-            }.maxByOrNull { it.second }
-            return if (preferred != null && preferred.second >= 3)
-                listOf(preferred.first) + ranked.filter { it.text != preferred.first.text }
+            fun uses(candidate: Candidate) = historyForKey[candidate.text]?.let { Personalization.recentUses(it, now) } ?: 0
+            val preferred = ranked.maxByOrNull(::uses)
+            val ordered = if (preferred != null && uses(preferred) >= 3)
+                listOf(preferred) + ranked.filter { it.text != preferred.text }
             else ranked
+            // A width preference only swaps the two spellings in their existing slots.
+            val positions = ordered.withIndex().associate { it.value.text to it.index }
+            val result = ordered.toMutableList()
+            for ((index, candidate) in ordered.withIndex()) {
+                val alternateText = SymbolCandidates.alternateWidth(candidate.text) ?: continue
+                val alternate = positions[alternateText] ?: continue
+                if (alternate > index && uses(ordered[alternate]) > uses(candidate)) {
+                    result[index] = ordered[alternate]
+                    result[alternate] = candidate
+                }
+            }
+            return result
         }
         val alias = rankSymbols(SymbolCandidates.candidates(key, expressions.symbols, prediction, CandidateSource.SYMBOL_ALIAS))
         val symbol = rankSymbols(SymbolCandidates.candidates(key, symbols, prediction))
@@ -187,7 +198,8 @@ object JapaneseCandidates {
             .take(12)
             .mapNotNull { (choice) ->
                 val (reading, text) = choice
-                val isSymbol = text in expressions.symbols[reading].orEmpty() || text in symbols[reading].orEmpty()
+                val isSymbol = SymbolCandidates.contains(expressions.symbols, reading, text) ||
+                    SymbolCandidates.contains(symbols, reading, text)
                 val known = isSymbol || text in expressions.words[reading].orEmpty() ||
                     (engine as? DictionaryConversionEngine)?.knownChoice(reading, text) == true ||
                     PhrasePrediction.candidates(reading, false).any { it.text == text }

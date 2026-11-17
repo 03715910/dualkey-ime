@@ -263,6 +263,31 @@ class JapaneseDictionaryTest {
         assertEquals("てん", overlapping.exact.single { it.text == "⋯" }.reading)
     }
 
+    @Test fun relatedSymbolWidthsAreDistinctAndTheMoreUsedWidthRanksFirst() {
+        val reading="かっこ"
+        val entries=mapOf(reading to listOf("（）", "「」", "［］", "｛｝"), "ころん" to listOf("："), "てん" to listOf("…","⋯"))
+        val expressions=ExpressionCandidates(symbols=entries)
+        val now=1L
+        fun result(vararg history: LearnedChoice) = JapaneseCandidates.generate(reading, false, 64, engine,
+            expressions=expressions,history=history.toList(),now=now)
+        val defaults=result().exact.map { it.text }
+        assertTrue(defaults.containsAll(listOf("（）","()","「」","｢｣","［］","[]","｛｝","{}")))
+        assertTrue(defaults.indexOf("（）")<defaults.indexOf("()"))
+        for ((full,half) in listOf(0 to 1, 3 to 9, 10 to 4)) {
+            val ranks=result(LearnedChoice(reading,"（）",full,now),LearnedChoice(reading,"()",half,now))
+            for (candidates in listOf(ranks.all,ranks.exact)) {
+                val first=if (full>half) "（）" else "()"
+                val second=if (full>half) "()" else "（）"
+                assertTrue(candidates.indexOfFirst { it.text==first } in 0 until candidates.indexOfFirst { it.text==second })
+                assertEquals(1,candidates.count { it.text==first })
+            }
+        }
+        assertTrue(SymbolCandidates.contains(entries,reading,"()"))
+        assertEquals(listOf("：",":"),SymbolCandidates.candidates("ころん",entries,false).map { it.text })
+        assertEquals(listOf("…","⋯"),SymbolCandidates.candidates("てん",entries,false).map { it.text })
+        assertFalse(SymbolCandidates.isBracketPair("(T_T)"))
+    }
+
     @Test fun conversionKeepsTheChosenPunctuationWidthInTheReading() {
         assertTrue(JapaneseCandidates.generate("こんにちわ", false, 64, engine).all.any { it.text == "こんにちは" })
         for (mark in listOf("！", "？", "!", "?")) {

@@ -711,7 +711,8 @@ class DualKeyService : InputMethodService() {
             scope.launch(Dispatchers.Default) {
                 fun units(word: Candidate): List<Candidate> {
                     val reading = Personalization.normalize(word.reading)
-                    if (word.text in symbolEntries[reading].orEmpty() || word.text in expressions.symbols[reading].orEmpty())
+                    if (SymbolCandidates.contains(symbolEntries,reading,word.text) ||
+                        SymbolCandidates.contains(expressions.symbols,reading,word.text))
                         return listOf(word)
                     val parts=engine?.learningUnits(word.reading,word.text).orEmpty()
                     if (parts.isNotEmpty()) return parts
@@ -731,7 +732,22 @@ class DualKeyService : InputMethodService() {
         committedTail=if (contextAllowed && !english && NextWordPrediction.validContext(candidate.text))
             CommittedTail(candidate,cursorPosition()) else null
     }
-    private fun commitComposition(learn: Boolean=false) {
+    private fun commitCandidateText(text: String, placeInsidePair: Boolean=true): Boolean {
+        val connection=currentInputConnection ?: return false
+        if (!placeInsidePair || !SymbolCandidates.isBracketPair(text)) return connection.commitText(text,1)
+        connection.beginBatchEdit()
+        try {
+            if (!connection.commitText(text,1)) return false
+            // Check the inserted pair before moving, since the editor may filter input.
+            if (connection.getTextBeforeCursor(text.length,0)?.toString()==text) {
+                val end=cursorPosition()
+                if (end!=null && end>=text.length) connection.setSelection(end-1,end-1)
+                else sendDownUpKeyEvents(KeyEvent.KEYCODE_DPAD_LEFT)
+            }
+            return true
+        } finally { connection.endBatchEdit() }
+    }
+    private fun commitComposition(learn: Boolean=false,placeInsidePair: Boolean=learn) {
         compositionRestoreJob?.cancel(); compositionRestoreJob=null
         rotationComposition=null; composingEnd=null
         hardwareCandidates=false
@@ -739,7 +755,7 @@ class DualKeyService : InputMethodService() {
             val candidate=variant?.let { Candidate(it.text,it.reading) } ?:
                 if (converting && selected in candidateRecords.indices) candidateRecords[selected] else Candidate(composer.reading,composer.reading)
             val previous=committedTail?.takeIf { validTail(it,displayedComposition()) }
-            if (currentInputConnection?.commitText(candidate.text,1)==true) {
+            if (commitCandidateText(candidate.text,placeInsidePair && variant==null && converting && selected in candidateRecords.indices)) {
                 if (variant?.googlePowered==true) committedTail=null
                 else confirmed(candidate,previous,learn && variant==null && converting && selected in candidateRecords.indices)
             }
@@ -758,7 +774,7 @@ class DualKeyService : InputMethodService() {
             val tail=committedTail
             if (tail==null || !validTail(tail) || !composer.isEmpty) { committedTail=null; refreshCandidates(); return }
             invalidateTranslation()
-            if (currentInputConnection?.commitText(candidate.text,1)==true) confirmed(candidate,tail,true)
+            if (commitCandidateText(candidate.text)) confirmed(candidate,tail,true)
             resetConversion(); refreshCandidates(); return
         }
         val composing=displayedComposition()
@@ -766,10 +782,10 @@ class DualKeyService : InputMethodService() {
         resetVariant()
         if (english) {
             // English prediction owns a composing span, so no unrelated committed text is removed.
-            currentInputConnection?.commitText(candidate.text,1); englishWord=""
+            commitCandidateText(candidate.text); englishWord=""
         } else {
             val previous=committedTail?.takeIf { validTail(it,composing) }
-            if (currentInputConnection?.commitText(candidate.text,1)==true) confirmed(candidate,previous,true)
+            if (commitCandidateText(candidate.text)) confirmed(candidate,previous,true)
             composer.clear()
         }
         resetConversion(); refreshCandidates()
@@ -795,7 +811,7 @@ class DualKeyService : InputMethodService() {
                 if (compositionRestoreJob?.isActive!=true) currentInputConnection?.setComposingText(englishWord,1)
             } else { finishEnglish(); currentInputConnection?.commitText(value,1) }
         } else {
-            if (converting || variant!=null) commitComposition()
+            if (converting || variant!=null) commitComposition(placeInsidePair=true)
             committedTail?.let { if (composer.isEmpty && !validTail(it)) committedTail=null }
             composer.append(value); resetConversion()
             hardwareComposition=physical
