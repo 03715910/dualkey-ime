@@ -1,6 +1,23 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 36,
+    "versionName": "0.1.33",
+    "releaseDate": "2026-11-17",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.33/DualKeyIME-0.1.33.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "76d246d96c04c70405546102af5a773ba3f33b1dab697887e97460b50711507b",
+    "sizeBytes": 101787739,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "貼り付けや履歴を開く操作でも、取得できたコピーを履歴に追加します。",
+      "年号や日付を含む文章、通常のWebリンク、Windows形式の改行を含むテキストが履歴に残るよう改善しました。",
+      "画像や動画はプレビューとは独立して保存するため、画面切り替えで履歴から漏れにくくなります。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 35,
     "versionName": "0.1.32",
     "releaseDate": "2026-11-17",
