@@ -1,17 +1,16 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 36,
-  "versionName": "0.1.33",
+  "versionCode": 37,
+  "versionName": "0.1.34",
   "releaseDate": "2026-11-17",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.33/DualKeyIME-0.1.33.apk",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.34/DualKeyIME-0.1.34.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "76d246d96c04c70405546102af5a773ba3f33b1dab697887e97460b50711507b",
-  "sizeBytes": 101787739,
+  "sha256": "99c624618a868b73bc5ed9b01644df415ac170a72639450c3043387ae14fe3b0",
+  "sizeBytes": 101804123,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "貼り付けや履歴を開く操作でも、取得できたコピーを履歴に追加します。",
-    "年号や日付を含む文章、通常のWebリンク、Windows形式の改行を含むテキストが履歴に残るよう改善しました。",
-    "画像や動画はプレビューとは独立して保存するため、画面切り替えで履歴から漏れにくくなります。"
+    "確定済みの日本語を選択し、候補欄の「再変換」から別の候補に置き換えられるようになりました。",
+    "候補を決めるまでは、選択した元の文字を維持します。"
   ]
 }
