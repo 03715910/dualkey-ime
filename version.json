@@ -1,17 +1,16 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 33,
-  "versionName": "0.1.30",
-  "releaseDate": "2026-11-16",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.30/DualKeyIME-0.1.30.apk",
+  "versionCode": 34,
+  "versionName": "0.1.31",
+  "releaseDate": "2026-11-17",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.31/DualKeyIME-0.1.31.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "e29c09e44096c4d5f5cb68871e7fdb80d2ed164b23e2b56a300d19c7d3d696ae",
+  "sha256": "25da4a6c4056780b7f3ca72193d0d225807291053002ff15d9dead48b91e271a",
   "sizeBytes": 101787699,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "「こちらは完了していますか？」など、長文や文の途中から入力した文で、自然な漢字変換を上位に表示します。",
-    "文中の空白・絵文字・全角記号を保ったまま、前後の日本語を変換します。",
-    "入力途中の自然な補完と、同じ文脈で繰り返し選んだ候補の順位を改善しました。物理キーボードではTabで入力途中の予測候補を開けます。"
+    "画面の削除キーを左へフリックすると、現在の入力欄を一括削除できます。",
+    "通常タップは1文字、長押しは未確定の文字やカーソル直前のまとまりを削除します。"
   ]
 }

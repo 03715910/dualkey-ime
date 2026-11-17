@@ -1,6 +1,22 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 34,
+    "versionName": "0.1.31",
+    "releaseDate": "2026-11-17",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.31/DualKeyIME-0.1.31.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "25da4a6c4056780b7f3ca72193d0d225807291053002ff15d9dead48b91e271a",
+    "sizeBytes": 101787699,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "画面の削除キーを左へフリックすると、現在の入力欄を一括削除できます。",
+      "通常タップは1文字、長押しは未確定の文字やカーソル直前のまとまりを削除します。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 33,
     "versionName": "0.1.30",
     "releaseDate": "2026-11-16",
