@@ -360,31 +360,40 @@ class DeviceInputTest {
         val original=before+"漢字"+after
         resetPunctuationEditor(original)
         main { editor.setSelection(before.length,before.length+2) }
-        touch(rect("再変換"))
-        await("homophone available for selected kanji") { findNode { it.text?.toString()=="感じ" }!=null }
+        await("homophone appears as soon as kanji is selected") { findNode { it.text?.toString()=="感じ" }!=null }
+        assertNull(findNode { it.text?.toString()=="再変換" || it.contentDescription?.toString()=="再変換" })
         assertEquals(original,inputText())
         main { assertEquals("漢字",editor.text.substring(editor.selectionStart,editor.selectionEnd)) }
         clickLabel("感じ")
         await("only the highlighted range was replaced") { inputText()==before+"感じ"+after }
         main { assertEquals(before.length+2,editor.selectionStart); assertEquals(editor.selectionStart,editor.selectionEnd) }
     }
-    @Test fun reconversionCancelAndSelectionMoveLeaveTheOriginalTextIntact() {
-        val original="漢字と漢字"
+    @Test fun reconversionFollowsSelectionChangesAndHidesWhenDeselected() {
+        val original="漢字、天気、漢字"
         resetPunctuationEditor(original)
         main { editor.setSelection(0,2) }
-        clickLabel("再変換")
         await("reconversion candidates shown") { findNode { it.text?.toString()=="感じ" }!=null }
-        clickLabel("再変換を取り消す")
+        main { editor.setSelection(2) }
+        await("candidates gone after deselection") { findNode { it.text?.toString()=="感じ" }==null }
         assertEquals(original,inputText())
-        main { assertEquals(0,editor.selectionStart); assertEquals(2,editor.selectionEnd) }
-        clickLabel("再変換")
-        await("reconversion candidates reopened") { findNode { it.text?.toString()=="感じ" }!=null }
+        main { editor.setSelection(0,2) }
+        await("candidates return after reselection") { findNode { it.text?.toString()=="感じ" }!=null }
         main { editor.setSelection(3,5) }
-        await("old reconversion candidates cleared") { findNode { it.text?.toString()=="感じ" }==null }
+        await("candidates now match the new selection") {
+            findNode { it.text?.toString()=="てんき" }!=null && findNode { it.text?.toString()=="感じ" }==null
+        }
         assertEquals(original,inputText())
-        clickLabel("再変換")
+        main { editor.setSelection(6,8) }
         clickLabel("感じ")
-        await("only the newly selected duplicate changes") { inputText()=="漢字と感じ" }
+        await("only the newly selected duplicate changes") { inputText()=="漢字、天気、感じ" }
+    }
+    @Test fun automaticSelectionCandidatesDoNotInterceptBackspace() {
+        resetPunctuationEditor("この漢字です")
+        main { editor.setSelection(2,4) }
+        await("selection candidates before deletion") { findNode { it.text?.toString()=="感じ" }!=null }
+        touch(rect("⌫"))
+        await("Backspace deletes the selected text") { inputText()=="このです" }
+        assertNull(findNode { it.text?.toString()=="感じ" })
     }
     @Test fun pasteWorksWithHistoryOffAndToolbarHasNoDuplicateModeButton() {
         val app=instrumentation.targetContext.applicationContext as DualKeyApp

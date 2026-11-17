@@ -47,7 +47,6 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         candidateContent.addView(this)
     }
     private var composingReading=""
-    private var reconversionAction: String? = null
     private var candidateExpanded = false
     private var previousCandidates=emptyList<String>()
     private var dictionaryNotice = ""
@@ -78,8 +77,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         keys.visibility=if (showKeys && !translating && !candidateExpanded) View.VISIBLE else View.GONE
         expandedScroll.visibility=if (candidateExpanded && !translating) View.VISIBLE else View.GONE
         candidateTabs.visibility=expandedScroll.visibility
-        val canShowPreview=composingReading.isEmpty() && reconversionAction==null &&
-            !candidateExpanded && !translating && googleText==null
+        val canShowPreview=composingReading.isEmpty() && !candidateExpanded && !translating && googleText==null
         val showScreenshot=canShowPreview && screenshotPreview.childCount>0
         val showClipboard=canShowPreview && !showScreenshot && clipboardPreview.childCount>0
         screenshotPreview.visibility=if (showScreenshot) View.VISIBLE else View.GONE
@@ -308,12 +306,11 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     }
 
     fun candidates(lists: CandidateLists, selected: Int, select: (Candidate) -> Unit, canLoadMore: Boolean=false,
-        loading: Boolean=false, reading: String = "", selectionAction: String?=null) {
+        loading: Boolean=false, reading: String = "") {
         val values=lists.all.map { it.text }
         val changed=values.take(3)!=previousCandidates.take(3)
         previousCandidates=values
         composingReading=reading
-        reconversionAction=selectionAction
         candidateStrip.removeAllViews()
         candidateExpand.visibility=if (values.isEmpty() && !candidateExpanded) View.GONE else View.VISIBLE
         if (values.isEmpty()) {
@@ -335,7 +332,6 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
             updateBody()
             if (candidateExpanded) callback("expand_candidates")
         }
-        if (values.isNotEmpty()) addReconversionAction()
         values.take(20).forEachIndexed { index,value -> candidateStrip.addView(TextView(context).apply {
             text=value; textSize=17f; setTextColor(if (selected==index) Color.WHITE else ink); includeFontPadding=false
             gravity=Gravity.CENTER_VERTICAL; setPadding(dp(10),0,dp(10),0); isFocusable=false
@@ -379,19 +375,9 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     }
     private fun renderEmptyCandidates() {
         candidateStrip.removeAllViews()
-        if (reconversionAction!=null) { addReconversionAction(); return }
         if (!englishMode && dictionaryNotice.isNotEmpty()) candidateStrip.addView(TextView(context).apply {
             text=dictionaryNotice; textSize=12f; setTextColor(ink); gravity=Gravity.CENTER_VERTICAL; includeFontPadding=false
             setSingleLine(true); ellipsize=android.text.TextUtils.TruncateAt.END; setPadding(dp(8),0,0,0)
-        })
-    }
-    private fun addReconversionAction() {
-        val action=reconversionAction ?: return
-        val cancel=action=="cancel_reconversion"
-        candidateStrip.addView(button(if (cancel) "取消" else "再変換",action,small=true,
-            description=if (cancel) "再変換を取り消す" else "再変換").apply {
-            layoutParams=LinearLayout.LayoutParams(-2,-1)
-            setPadding(dp(10),0,dp(10),0)
         })
     }
     fun showTranslation(message: String, actions: List<Pair<String,()->Unit>>, attribution: Boolean = false) {

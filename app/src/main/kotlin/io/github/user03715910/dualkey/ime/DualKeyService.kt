@@ -130,7 +130,8 @@ class DualKeyService : InputMethodService() {
     private var editorSelection: EditorSelection?=null
     private var reconversion: Reconversion?=null
     private var reconversionJob: Job?=null
-    private val canReconvert get()=hasEditor() && japaneseConversionAllowed && !asciiPunctuation &&
+    private val canReconvert get()=windowShown && isInputViewShown && visibility.mode!=DisplayMode.HIDDEN &&
+        hasEditor() && japaneseConversionAllowed && !asciiPunctuation &&
         editorSelection!=null && composer.isEmpty && englishWord.isEmpty()
     private var blockedClipTimestamp=-1L
     private val clipboardListener=ClipboardManager.OnPrimaryClipChangedListener {
@@ -163,7 +164,7 @@ class DualKeyService : InputMethodService() {
         scope.launch { app.clipboardMedia.pinnedEntries.collect { if (clipboardShowing) clipboardHistory() } }
         scope.launch { app.clipboard.state.collect { if (clipboardShowing) clipboardHistory() } }
         scope.launch { app.clipboard.clearEvents.collect { clearMediaHistory(); if (clipboardShowing) clipboardHistory() } }
-        scope.launch { app.japaneseDictionary.engine.collect { refreshCandidates() } }
+        scope.launch { app.japaneseDictionary.engine.collect { refreshCandidates(); scheduleReconversion() } }
         scope.launch { app.semanticDictionary.lexicon.collect { refreshCandidates() } }
         scope.launch { app.japaneseDictionary.message.collect { ui?.dictionaryStatus(it) } }
         scope.launch { app.learning.state.collect { refreshCandidates() } }
@@ -200,6 +201,7 @@ class DualKeyService : InputMethodService() {
         refreshScreenshot()
         window?.window?.decorView?.post {
             updateCaptionVisibility()
+            scheduleReconversion()
             if (windowShown && hardwareCandidates) showHardwareCandidates()
         }
     }
@@ -402,6 +404,7 @@ class DualKeyService : InputMethodService() {
         super.onStartInputView(info,restarting)
         if (hasEditor() && visibility.mode!=DisplayMode.HIDDEN) editorRequested=true
         rebuild(); refreshCandidates(); publishVisibility(); captureClipboard(); refreshClipboardPreview(); refreshScreenshot()
+        scheduleReconversion()
     }
     override fun onFinishInput() {
         lifecycleState("finish")
@@ -595,7 +598,7 @@ class DualKeyService : InputMethodService() {
         if (selected >= candidates.size) selected=-1
         val canExpand=candidateQuery?.let { it.limit<10000 && candidates.size>=it.limit }==true
         ui?.googleComposition(variant?.takeIf { it.googlePowered }?.text)
-        val reading=if (english) englishWord else composer.reading
+        val reading=reconversion?.text ?: if (english) englishWord else composer.reading
         val shown=candidateLists
         val editorSession=session
         val inlineSelection=if (candidateRecords===shown.all) selected else candidates.getOrNull(selected)?.let { text ->
@@ -603,11 +606,7 @@ class DualKeyService : InputMethodService() {
         } ?: -1
         ui?.candidates(shown,inlineSelection,{ candidate ->
             if (session==editorSession && candidateLists===shown) commitCandidate(candidate)
-        },canExpand,candidateLoading,reading,when {
-            reconversion!=null -> "cancel_reconversion"
-            canReconvert -> "reconvert"
-            else -> null
-        })
+        },canExpand,candidateLoading,reading)
         showHardwareCandidates()
     }
     private fun canLoadMoreHardwareCandidates() = !candidateLoading &&
@@ -881,10 +880,6 @@ class DualKeyService : InputMethodService() {
         invalidateTranslation(); commitComposition(); committedTail=null; finishEnglish(); english=toEnglish; shift=0; resetConversion(); rebuild(); refreshCandidates()
     }
     private fun space() {
-        if (reconversion!=null) {
-            if (candidates.isNotEmpty()) { selected=(selected+1)%candidates.size; showCandidates() }
-            return
-        }
         invalidateTranslation()
         resetVariant()
         if (english || sensitive || numeric || composer.isEmpty) { committedTail=null; finishEnglish(); currentInputConnection?.commitText(" ",1); refreshCandidates(); return }
@@ -899,7 +894,6 @@ class DualKeyService : InputMethodService() {
         syncComposition()
     }
     private fun enter(physical: Boolean=false,shiftPressed: Boolean=false) {
-        if (reconversion!=null) { commitCandidate(selected); return }
         invalidateTranslation()
         val info=currentInputEditorInfo
         val action=(info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
@@ -934,7 +928,6 @@ class DualKeyService : InputMethodService() {
             composer.isEmpty && englishWord.isEmpty() && variant==null && !converting
 
     private fun delete() {
-        if (reconversion!=null) { cancelReconversion(); return }
         invalidateTranslation()
         if (hardwarePredictionOpen) resetConversion()
         if (variant!=null) { resetVariant(); resetConversion(); syncComposition(); return }
@@ -1415,8 +1408,6 @@ class DualKeyService : InputMethodService() {
         hardwareCandidates=false; hardwarePanel.dismiss()
         when (key) {
             "expand_candidates" -> moreCandidates(true)
-            "reconvert" -> startReconversion()
-            "cancel_reconversion" -> cancelReconversion()
             "paste" -> pasteClipboard()
             "clipboard_history" -> { app.clipboard.prune(); captureClipboard(); refreshClipboardPreview(); refreshScreenshot(); clipboardHistory() }
             "symbol_catalog" -> {
@@ -1531,7 +1522,7 @@ class DualKeyService : InputMethodService() {
                     handled=false
                 } else delete()
             }
-            keyCode==KeyEvent.KEYCODE_ESCAPE && reconversion!=null -> cancelReconversion()
+            keyCode==KeyEvent.KEYCODE_ESCAPE && (reconversion!=null || reconversionJob?.isActive==true) -> cancelReconversion()
             keyCode==KeyEvent.KEYCODE_ESCAPE && (continuationCandidates || !composer.isEmpty || englishWord.isNotEmpty()) -> {
                 invalidateTranslation()
                 val closePrediction=hardwarePredictionOpen
@@ -1588,57 +1579,49 @@ class DualKeyService : InputMethodService() {
             if (translationJob!=null) invalidateTranslation()
             committedTail?.let { if (!validTail(it)) { committedTail=null; resetConversion(); refreshCandidates() } }
         }
-        if (selectionChanged) showCandidates()
+        if (selectionChanged) scheduleReconversion()
     }
     private fun editorSelection(start: Int,end: Int): EditorSelection? =
         if (start>=0 && end>=0 && start!=end) EditorSelection(start,end) else null
 
-    private fun startReconversion() {
-        if (!canReconvert) return
+    private fun scheduleReconversion() {
+        if (!canReconvert || reconversion!=null || reconversionJob?.isActive==true) return
         val range=editorSelection ?: return
-        val connection=currentInputConnection ?: return
-        val maximum=DictionaryConversionEngine.MAX_RECONVERSION_LENGTH
-        if (range.length>maximum) {
-            Toast.makeText(this,"再変換する範囲を${maximum}文字以内で選択してください",Toast.LENGTH_SHORT).show()
-            return
-        }
-        val engine=conversion as? DictionaryConversionEngine ?: run {
-            Toast.makeText(this,"日本語辞書の準備後に再変換できます",Toast.LENGTH_SHORT).show()
-            return
-        }
-        val source=runCatching { connection.getSelectedText(0)?.toString() }.getOrNull()
-        if (source.isNullOrBlank() || source.length!=range.length || selectionReportIsStale(range.start,range.end)) return
-        clearState()
-        val request=Reconversion(range,source,session)
-        reconversion=request
-        candidateLoading=true
-        showCandidates()
-        val choices=if (settings.learningEnabled && learningAllowed) app.learning.state.value.entries else emptyList()
+        if (range.length>DictionaryConversionEngine.MAX_RECONVERSION_LENGTH) return
+        val engine=conversion as? DictionaryConversionEngine ?: return
+        val editorSession=session
         reconversionJob=scope.launch {
+            // Dragging a selection handle can report many intermediate ranges.
+            delay(120)
+            if (!canReconvert || session!=editorSession || editorSelection!=range) return@launch
+            val connection=currentInputConnection ?: return@launch
+            val source=runCatching { connection.getSelectedText(0)?.toString() }.getOrNull()
+            if (source.isNullOrBlank() || source.length!=range.length || selectionReportIsStale(range.start,range.end)) return@launch
+            val choices=if (settings.learningEnabled && learningAllowed) app.learning.state.value.entries else emptyList()
             val alternatives=withContext(Dispatchers.Default) {
                 engine.reconvert(source) { reading ->
                     ensureActive()
                     JapaneseCandidates.generate(reading,false,48,engine,choices).all
                 }
             }
-            if (reconversion!==request || request.session!=session || !canReconvert) return@launch
-            if (alternatives.isEmpty()) {
-                cancelReconversion()
-                Toast.makeText(this@DualKeyService,"選択範囲に再変換できる日本語がありません",Toast.LENGTH_SHORT).show()
-                return@launch
-            }
+            if (alternatives.isEmpty() || !canReconvert || session!=editorSession || editorSelection!=range) return@launch
+            candidateJob?.cancel()
+            candidateQuery=null
             candidateLoading=false
+            committedTail=null
+            continuationCandidates=false
+            reconversion=Reconversion(range,source,editorSession)
+            selected=-1
             setCandidateRecords(CandidateLists(alternatives,alternatives))
-            selected=0
             showCandidates()
         }
     }
 
     private fun cancelReconversion() {
-        if (reconversion==null) return
-        reconversion=null
         reconversionJob?.cancel()
         reconversionJob=null
+        if (reconversion==null) return
+        reconversion=null
         candidateLoading=false
         selected=-1
         setCandidateRecords(CandidateLists())
