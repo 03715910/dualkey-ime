@@ -1,6 +1,22 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 38,
+    "versionName": "0.1.35",
+    "releaseDate": "2026-11-17",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.35/DualKeyIME-0.1.35.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "2e7fef6f16ee25401e4433685c44a16a16883b0ecf8ab775e44c007fc2297bdd",
+    "sizeBytes": 101804123,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "確定済みの日本語を選択すると、その範囲の変換候補が自動で表示されます。",
+      "候補をタップすると選択範囲だけが置き換わり、選択を解除すると候補が閉じます。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 37,
     "versionName": "0.1.34",
     "releaseDate": "2026-11-17",
