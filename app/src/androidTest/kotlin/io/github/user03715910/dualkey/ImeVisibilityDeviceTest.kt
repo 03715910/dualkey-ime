@@ -169,6 +169,24 @@ class ImeVisibilityDeviceTest {
             await("pinned JPEG received from history") { mediaResult().contains("image/jpeg; match=true") }
         } finally { runBlocking { app.settings.set(Prefs.clipboardHistory,false) } }
     }
+    @Test fun copiedImageRemainsInHistoryWhenCopiedWithKeyboardHidden() {
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        try {
+            launch("images"); await("image editor window focused") { fixtureState().contains("windowFocus=true") }; edit()
+            main { ImeControl.request(DisplayMode.HIDDEN) }
+            stableHidden()
+            assertTrue(ImeControl.state.value.editorActive)
+            click("copy-test.png")
+            // The fixture copies from a different process, so the IME must obtain each URI from Android.
+            SystemClock.sleep(700)
+            click("copy-test.jpeg")
+            main { ImeControl.request(DisplayMode.FULL) }
+            await("keyboard restored") { ImeControl.state.value.keyboardVisible }
+            keyboardAction("貼り付け。長押しで履歴",AccessibilityNodeInfo.ACTION_LONG_CLICK)
+            keyboardAction("画像 · PNG")
+            await("earlier PNG received from history after a newer copy") { mediaResult().contains("image/png; match=true") }
+        } finally { runBlocking { app.settings.set(Prefs.clipboardHistory,false) } }
+    }
     @Test fun richEditorReceivesImagesGifAndVideoWithActualReadGrant() {
         launch("rich"); await("rich editor window focused") { fixtureState().contains("windowFocus=true") }; edit()
         listOf("test.png" to "image/png","test.jpeg" to "image/jpeg","test.webp" to "image/webp",

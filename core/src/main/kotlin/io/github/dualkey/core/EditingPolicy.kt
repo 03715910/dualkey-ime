@@ -28,9 +28,19 @@ object ScreenShift {
 }
 
 object ClipboardPrivacy {
+    private val credentialWord=Regex("(?i)password|passwd|パスワード|secret|token|api[_ -]?key|-----BEGIN|認証コード|確認コード|暗証番号|\\b(?:otp|pin)\\b")
+    private val calendarYear=Regex("(?<![0-9０-９])[12１２][0-9０-９]{3}(?=年|[-/.][0-9０-９]{1,2}[-/.][0-9０-９]{1,2}(?![0-9０-９]))")
+    private val digits=Regex("[0-9０-９]{4,}")
+    private val opaqueValue=Regex("[A-Za-z0-9_+/=-]{24,}")
+    private val uriLink=Regex("(?i)[a-z][a-z0-9+.-]*://[^\\s<>\"「」]+")
+
     fun retain(text: String,sensitive: Boolean): Boolean = !sensitive && text.length in 1..2000 &&
-        text.isNotBlank() && text.none { it.isISOControl() && it!='\n' && it!='\t' } &&
-        !text.contains('@') && !text.contains("://") &&
-        !Regex("[0-9０-９]{4,}|(?i)password|passwd|パスワード|secret|token|api[_ -]?key|-----BEGIN").containsMatchIn(text) &&
-        !Regex("[A-Za-z0-9_+/=-]{24,}").containsMatchIn(text)
+        text.isNotBlank() && text.none { it.isISOControl() && it !in "\r\n\t" } &&
+        '@' !in text && !credentialWord.containsMatchIn(text) &&
+        !digits.containsMatchIn(calendarYear.replace(text," ")) && !opaqueValue.containsMatchIn(text) &&
+        uriLink.findAll(text).all { match ->
+            val uri=runCatching { java.net.URI(match.value) }.getOrNull()
+            uri!=null && uri.scheme.lowercase() in setOf("http","https") && uri.host!=null &&
+                uri.rawUserInfo==null && uri.rawQuery==null && uri.rawFragment==null
+        }
 }

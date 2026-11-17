@@ -32,11 +32,18 @@ class EditingAndPredictionTest {
     }
     @Test fun clipboardHistoryRejectsMarkedAndCommonSensitiveFormats() {
         assertFalse(ClipboardPrivacy.retain("普通の文",true))
-        for (text in listOf("mail@example.com","https://example.com","09012345678","password: abc","sk-1234567890123456789012345678",""))
+        for (text in listOf("mail@example.com","https://example.com/reset?code=abcd","https://example.com/#session",
+            "https://user:pass@example.com/","09012345678","2026","認証コードは1234です",
+            "password: abc","sk-1234567890123456789012345678",""))
             assertFalse(text,ClipboardPrivacy.retain(text,false))
         assertTrue(ClipboardPrivacy.retain("あとで確認する文章",false))
         assertTrue(ClipboardPrivacy.retain("hello world",false))
         assertFalse(ClipboardPrivacy.retain("あ".repeat(2001),false))
+    }
+    @Test fun clipboardHistoryAcceptsOrdinaryDatesWebLinksAndWindowsLineBreaks() {
+        for (text in listOf("2026年の予定","会議は2026/11/17です","議事録\r\n来週の予定","https://example.com/help",
+            "公開資料はこちら https://example.com/docs"))
+            assertTrue(text,ClipboardPrivacy.retain(text,false))
     }
     @Test fun greetingCompletionAndContextDoNotNeedPersonalHistory() {
         assertTrue(PhrasePrediction.candidates("おは",true).map { it.text }.containsAll(listOf("おはよう","おはようございます")))

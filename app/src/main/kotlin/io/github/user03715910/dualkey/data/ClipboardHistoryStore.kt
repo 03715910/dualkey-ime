@@ -41,6 +41,8 @@ class ClipboardHistoryStore(context: Context,private val scope: CoroutineScope,p
         .filter { it.pinned || System.currentTimeMillis()-it.time in 0..86_400_000L }
     fun prune() { scope.launch(Dispatchers.IO) { loaded.await(); mutex.withLock { snapshot.value=current(); runCatching { persist() } } } }
     @Volatile private var epoch=0L
+    @Volatile internal var clearedThrough=0L
+        private set
     init {
         scope.launch(Dispatchers.IO) {
             try {
@@ -133,6 +135,7 @@ class ClipboardHistoryStore(context: Context,private val scope: CoroutineScope,p
         snapshot.value=snapshot.value.filterNot { it==entry }; runCatching { persist() }
     } } }
     fun clear() {
+        if (settings.state.value.clipboardHistory) clearedThrough=System.currentTimeMillis()
         clearScreenshots()
         epoch++
         clears.value=epoch

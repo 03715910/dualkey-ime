@@ -508,7 +508,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
                     holder.delete.contentDescription="メディア履歴 ${position-entries.size+1}を削除"
                     holder.delete.setOnClickListener { removeMedia(entry) }
                     holder.pin.setOnClickListener { pinMedia(entry) }
-                    if (entry.pinned && entry.preview==null) {
+                    if (entry.preview==null) {
                         holder.preview.visibility=View.VISIBLE
                         holder.preview.tag=entry
                         loadMedia(entry,holder.preview)

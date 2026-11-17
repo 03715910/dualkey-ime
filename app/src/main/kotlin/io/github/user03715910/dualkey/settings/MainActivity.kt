@@ -295,7 +295,7 @@ class MainActivity : AppCompatActivity() {
             slider("履歴の最大件数",Prefs.clipboardLimit,s.clipboardLimit,5,100)
             slider("メディアの保存期間（分）",Prefs.clipboardMediaMinutes,s.clipboardMediaMinutes,5,60)
             text("初期状態はOFFです。ONにすると、DualKeyの通常入力中に取得できた文字列を端末内だけに保存します。履歴は読込・表示時に24時間以内へ整理します。OFFにすると保存済み履歴も削除します。")
-            text("機密フラグ付きのコピー、パスワード・学習禁止欄、メール・URL・長い数字列などは履歴へ保存しません。機密と通知されない文章を完全に判別することはできないため、秘密の文章を扱うときはOFFにしてください。通常の貼り付けは履歴OFFでも使えます。")
+            text("機密フラグ付きのコピー、パスワード・数字入力欄でのコピー、メールアドレス、暗証番号のような数字列は保存対象外です。通常のWebリンクは保存できます。認証情報が含まれうるクエリやフラグメント付きのURLは除外します。秘密の文章を扱うときは履歴をOFFにしてください。貼り付けは履歴OFFでも使えます。")
             button("クリップボード履歴を全削除") {
                 AlertDialog.Builder(this).setMessage("保存したクリップボード履歴を削除しますか？")
                     .setPositiveButton("削除") { _,_ -> app.clipboard.clear(); toast("履歴を削除しました") }.setNegativeButton("戻る",null).show()

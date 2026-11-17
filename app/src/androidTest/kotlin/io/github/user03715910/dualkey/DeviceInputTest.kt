@@ -374,6 +374,40 @@ class DeviceInputTest {
         clickLabel("閉じる"); hold(rect("貼り付け")); assertTrue("Opening history must not resurrect the system's current clip",app.clipboard.current().isEmpty())
         captureHardware("clipboard-history")
     }
+    @Test fun ordinaryDatesLinksAndMultilineTextCanBePastedAndRetained() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        val samples=listOf("2026年の予定\r\n会議の案内","https://example.com/help","議事録\r\n来週の予定")
+        samples.forEach { sample ->
+            main { editor.setText(""); editor.setSelection(0) }
+            copy(sample)
+            touch(rect("貼り付け"))
+            await("clipboard text pasted verbatim") { inputText()==sample }
+        }
+        assertEquals("Paste succeeded for all samples; each copy should also be retained",
+            samples.toSet(),app.clipboard.current().map { it.text }.toSet())
+        hold(rect("貼り付け"))
+        await("link visible in history") { findNode { it.text?.toString()==samples[1] }!=null }
+    }
+    @Test fun multipleCopiesInAnActiveEditorAreRetainedWhileKeyboardIsHidden() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        main { ImeControl.request(DisplayMode.HIDDEN) }
+        await("editor stays active with IME hidden") { imeHeight()==0 && ImeControl.state.value.editorActive }
+        val first="非表示の間にコピーした一つ目"
+        val second="非表示の間にコピーした二つ目"
+        copy(first)
+        await("first hidden copy retained") { app.clipboard.current().any { it.text==first } }
+        copy(second)
+        await("second hidden copy retained") { app.clipboard.current().any { it.text==second } }
+        assertTrue(app.clipboard.current().any { it.text==first })
+        main { ImeControl.request(DisplayMode.FULL) }
+        await("IME shown again") { imeHeight()>300 }
+        hold(rect("貼り付け"))
+        await("both hidden copies visible in history") {
+            findNode { it.text?.toString()==first }!=null && findNode { it.text?.toString()==second }!=null
+        }
+    }
     @Test fun markedSensitiveClipIsNotRetainedAndDisablingErasesHistory() {
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
         runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
