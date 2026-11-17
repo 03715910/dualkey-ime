@@ -119,6 +119,12 @@ public class LifecycleFixtureActivity extends Activity {
     }
     private void command(String value) {
         if (value.startsWith("copy-")) { copyMedia(value.substring(5)); return; }
+        if (value.equals("expect-earlier-png")) {
+            try (InputStream input=new FileInputStream(new File(getCacheDir(),"test.png"))) {
+                expectedMedia=readBytes(input);
+            } catch (IOException e) { received="fixture-read-error"; }
+            return;
+        }
         if (value.equals("reset-media")) { received="none"; return; }
         switch(value) {
             case "edit": beginInput(); break;

@@ -180,6 +180,7 @@ class ImeVisibilityDeviceTest {
             // The fixture copies from a different process, so the IME must obtain each URI from Android.
             SystemClock.sleep(700)
             click("copy-test.jpeg")
+            click("expect-earlier-png")
             main { ImeControl.request(DisplayMode.FULL) }
             await("keyboard restored") { ImeControl.state.value.keyboardVisible }
             keyboardAction("貼り付け。長押しで履歴",AccessibilityNodeInfo.ACTION_LONG_CLICK)
