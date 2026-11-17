@@ -103,8 +103,8 @@ object JapaneseCandidates {
             addAll(trusted)
             addAll(directWords.take(wordsBeforeScripts))
             addAll(raw)
+            addAll(exactAlias.drop(3))
             addAll(directWords.drop(wordsBeforeScripts))
-            addAll(exactAlias)
             addAll(symbol.filter { it.reading == key })
         })
 

@@ -271,7 +271,7 @@ class JapaneseDictionaryTest {
         fun result(vararg history: LearnedChoice) = JapaneseCandidates.generate(reading, false, 64, engine,
             expressions=expressions,history=history.toList(),now=now)
         val defaults=result().exact.map { it.text }
-        assertTrue(defaults.containsAll(listOf("（）","()","「」","｢｣","［］","[]","｛｝","{}")))
+        assertTrue(defaults.toString(),defaults.containsAll(listOf("（）","()","「」","｢｣","［］","[]","｛｝","{}")))
         assertTrue(defaults.indexOf("（）")<defaults.indexOf("()"))
         for ((full,half) in listOf(0 to 1, 3 to 9, 10 to 4)) {
             val ranks=result(LearnedChoice(reading,"（）",full,now),LearnedChoice(reading,"()",half,now))
