@@ -1,16 +1,16 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 34,
-  "versionName": "0.1.31",
+  "versionCode": 35,
+  "versionName": "0.1.32",
   "releaseDate": "2026-11-17",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.31/DualKeyIME-0.1.31.apk",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.32/DualKeyIME-0.1.32.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "25da4a6c4056780b7f3ca72193d0d225807291053002ff15d9dead48b91e271a",
-  "sizeBytes": 101787699,
+  "sha256": "e18a0fb556ed808390cc4a03d86691fd9cb8e06d4d6c578f1a955317f33a914f",
+  "sizeBytes": 101787739,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "画面の削除キーを左へフリックすると、現在の入力欄を一括削除できます。",
-    "通常タップは1文字、長押しは未確定の文字やカーソル直前のまとまりを削除します。"
+    "「かっこ」などの変換で全角と半角の候補を表示し、よく選ぶ表記を優先します。",
+    "括弧のペアを変換候補から確定すると、カーソルが括弧の内側に移動します。"
   ]
 }

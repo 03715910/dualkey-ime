@@ -1,6 +1,22 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 35,
+    "versionName": "0.1.32",
+    "releaseDate": "2026-11-17",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.32/DualKeyIME-0.1.32.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "e18a0fb556ed808390cc4a03d86691fd9cb8e06d4d6c578f1a955317f33a914f",
+    "sizeBytes": 101787739,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "「かっこ」などの変換で全角と半角の候補を表示し、よく選ぶ表記を優先します。",
+      "括弧のペアを変換候補から確定すると、カーソルが括弧の内側に移動します。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 34,
     "versionName": "0.1.31",
     "releaseDate": "2026-11-17",
