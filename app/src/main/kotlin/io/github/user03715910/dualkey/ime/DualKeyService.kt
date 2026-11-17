@@ -123,6 +123,15 @@ class DualKeyService : InputMethodService() {
     private var observedMedia=-1L
     private var observedText=-1L
     private var selectionEpoch=0L
+    private data class EditorSelection(val start: Int,val end: Int) {
+        val length get() = kotlin.math.abs(start-end)
+    }
+    private data class Reconversion(val selection: EditorSelection,val text: String,val session: Long)
+    private var editorSelection: EditorSelection?=null
+    private var reconversion: Reconversion?=null
+    private var reconversionJob: Job?=null
+    private val canReconvert get()=hasEditor() && japaneseConversionAllowed && !asciiPunctuation &&
+        editorSelection!=null && composer.isEmpty && englishWord.isEmpty()
     private var blockedClipTimestamp=-1L
     private val clipboardListener=ClipboardManager.OnPrimaryClipChangedListener {
         if (hasEditor() && !clipboardEligible()) {
@@ -201,7 +210,7 @@ class DualKeyService : InputMethodService() {
         if (ownHidePending && wasShown) ownHideSettlesAt=maxOf(ownHideSettlesAt,SystemClock.uptimeMillis()+350)
         ownHidePending=false
         lifecycleState("hidden(own=$expected)")
-        windowShown=false; clearClipboardPreview(); candidateHostRequested=false; hardwarePanel.dismiss()
+        windowShown=false; clearClipboardPreview(); cancelReconversion(); candidateHostRequested=false; hardwarePanel.dismiss()
         if (!expected || !hasEditor()) {
             hardwareCandidates=false
             candidateHostRetry?.cancel()
@@ -336,6 +345,7 @@ class DualKeyService : InputMethodService() {
         super.onStartInput(attribute,restarting)
         clearClipboardPreview()
         session++; inputStarted=type and InputType.TYPE_MASK_CLASS != InputType.TYPE_NULL
+        editorSelection=editorSelection(attribute.initialSelStart,attribute.initialSelEnd)
         editorKey=if (inputStarted) key else null
         if (!preserve) clearState() else invalidateTranslation()
         if (preserve && !changingConfiguration && (owned.isNotEmpty() || rotation!=null)) {
@@ -400,7 +410,7 @@ class DualKeyService : InputMethodService() {
         runCatching { currentInputConnection?.requestCursorUpdates(0) }
         commitComposition(); finishEnglish()
         currentInputConnection?.finishComposingText()
-        clearState(); inputStarted=false; editorKey=null; editorRequested=false
+        editorSelection=null; clearState(); inputStarted=false; editorKey=null; editorRequested=false
         ImeControl.inputActive=false; session++; displayEpoch++; displayRetry?.cancel(); publishVisibility()
         super.onFinishInput()
     }
@@ -409,7 +419,7 @@ class DualKeyService : InputMethodService() {
         clearClipboardPreview()
         stopScreenshot()
         // The old connection can outlive its client; never let a delayed show use it.
-        inputStarted=false; editorKey=null; editorRequested=false; ImeControl.inputActive=false
+        inputStarted=false; editorKey=null; editorRequested=false; editorSelection=null; ImeControl.inputActive=false
         session++; displayEpoch++; displayRetry?.cancel(); clearState(); applyVisibility(false)
         super.onUnbindInput()
     }
@@ -497,6 +507,7 @@ class DualKeyService : InputMethodService() {
         if (settings.sound) getSystemService(AudioManager::class.java).playSoundEffect(AudioManager.FX_KEY_CLICK,0.3f)
     }
     private fun invalidateTranslation(keepSymbols: Boolean=false) {
+        cancelReconversion()
         clipboardShowing=false
         revision++; translationJob?.cancel(); translationJob=null; variantJob?.cancel(); variantJob=null; ui?.hideTranslation(keepSymbols)
     }
@@ -513,6 +524,7 @@ class DualKeyService : InputMethodService() {
     }
     private fun resetConversion() { selected=-1; converting=false; hardwareCandidates=false }
     private fun refreshCandidates() {
+        if (reconversion!=null) { showCandidates(); return }
         continuationCandidates=false
         if (japaneseConversionAllowed && !english && !composer.isEmpty &&
             (converting || settings.japanesePrediction && (!hardwareComposition || hardwarePredictionOpen))) {
@@ -591,7 +603,11 @@ class DualKeyService : InputMethodService() {
         } ?: -1
         ui?.candidates(shown,inlineSelection,{ candidate ->
             if (session==editorSession && candidateLists===shown) commitCandidate(candidate)
-        },canExpand,candidateLoading,reading)
+        },canExpand,candidateLoading,reading,when {
+            reconversion!=null -> "cancel_reconversion"
+            canReconvert -> "reconvert"
+            else -> null
+        })
         showHardwareCandidates()
     }
     private fun canLoadMoreHardwareCandidates() = !candidateLoading &&
@@ -769,6 +785,7 @@ class DualKeyService : InputMethodService() {
     }
     private fun commitCandidate(candidate: Candidate) {
         if (!hasEditor()) return
+        reconversion?.let { request -> commitReconversion(request,candidate.text); return }
         compositionRestoreJob?.cancel(); compositionRestoreJob=null
         rotationComposition=null; composingEnd=null
         hardwareCandidates=false
@@ -864,6 +881,10 @@ class DualKeyService : InputMethodService() {
         invalidateTranslation(); commitComposition(); committedTail=null; finishEnglish(); english=toEnglish; shift=0; resetConversion(); rebuild(); refreshCandidates()
     }
     private fun space() {
+        if (reconversion!=null) {
+            if (candidates.isNotEmpty()) { selected=(selected+1)%candidates.size; showCandidates() }
+            return
+        }
         invalidateTranslation()
         resetVariant()
         if (english || sensitive || numeric || composer.isEmpty) { committedTail=null; finishEnglish(); currentInputConnection?.commitText(" ",1); refreshCandidates(); return }
@@ -878,6 +899,7 @@ class DualKeyService : InputMethodService() {
         syncComposition()
     }
     private fun enter(physical: Boolean=false,shiftPressed: Boolean=false) {
+        if (reconversion!=null) { commitCandidate(selected); return }
         invalidateTranslation()
         val info=currentInputEditorInfo
         val action=(info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
@@ -912,6 +934,7 @@ class DualKeyService : InputMethodService() {
             composer.isEmpty && englishWord.isEmpty() && variant==null && !converting
 
     private fun delete() {
+        if (reconversion!=null) { cancelReconversion(); return }
         invalidateTranslation()
         if (hardwarePredictionOpen) resetConversion()
         if (variant!=null) { resetVariant(); resetConversion(); syncComposition(); return }
@@ -1392,6 +1415,8 @@ class DualKeyService : InputMethodService() {
         hardwareCandidates=false; hardwarePanel.dismiss()
         when (key) {
             "expand_candidates" -> moreCandidates(true)
+            "reconvert" -> startReconversion()
+            "cancel_reconversion" -> cancelReconversion()
             "paste" -> pasteClipboard()
             "clipboard_history" -> { app.clipboard.prune(); captureClipboard(); refreshClipboardPreview(); refreshScreenshot(); clipboardHistory() }
             "symbol_catalog" -> {
@@ -1506,6 +1531,7 @@ class DualKeyService : InputMethodService() {
                     handled=false
                 } else delete()
             }
+            keyCode==KeyEvent.KEYCODE_ESCAPE && reconversion!=null -> cancelReconversion()
             keyCode==KeyEvent.KEYCODE_ESCAPE && (continuationCandidates || !composer.isEmpty || englishWord.isNotEmpty()) -> {
                 invalidateTranslation()
                 val closePrediction=hardwarePredictionOpen
@@ -1540,6 +1566,10 @@ class DualKeyService : InputMethodService() {
     override fun onKeyUp(keyCode: Int, event: KeyEvent): Boolean = if (consumed.remove(keyCode)) true else super.onKeyUp(keyCode,event)
     override fun onUpdateSelection(oldSelStart: Int, oldSelEnd: Int, newSelStart: Int, newSelEnd: Int, candidatesStart: Int, candidatesEnd: Int) {
         super.onUpdateSelection(oldSelStart,oldSelEnd,newSelStart,newSelEnd,candidatesStart,candidatesEnd)
+        val selection=editorSelection(newSelStart,newSelEnd)
+        val selectionChanged=editorSelection!=selection
+        editorSelection=selection
+        if (selectionChanged) cancelReconversion()
         if (oldSelStart!=newSelStart || oldSelEnd!=newSelEnd) selectionEpoch++
         val ownsComposition=!composer.isEmpty || englishWord.isNotEmpty()
         val moved=oldSelStart!=newSelStart || oldSelEnd!=newSelEnd
@@ -1558,7 +1588,82 @@ class DualKeyService : InputMethodService() {
             if (translationJob!=null) invalidateTranslation()
             committedTail?.let { if (!validTail(it)) { committedTail=null; resetConversion(); refreshCandidates() } }
         }
+        if (selectionChanged) showCandidates()
     }
+    private fun editorSelection(start: Int,end: Int): EditorSelection? =
+        if (start>=0 && end>=0 && start!=end) EditorSelection(start,end) else null
+
+    private fun startReconversion() {
+        if (!canReconvert) return
+        val range=editorSelection ?: return
+        val connection=currentInputConnection ?: return
+        val maximum=DictionaryConversionEngine.MAX_RECONVERSION_LENGTH
+        if (range.length>maximum) {
+            Toast.makeText(this,"再変換する範囲を${maximum}文字以内で選択してください",Toast.LENGTH_SHORT).show()
+            return
+        }
+        val engine=conversion as? DictionaryConversionEngine ?: run {
+            Toast.makeText(this,"日本語辞書の準備後に再変換できます",Toast.LENGTH_SHORT).show()
+            return
+        }
+        val source=runCatching { connection.getSelectedText(0)?.toString() }.getOrNull()
+        if (source.isNullOrBlank() || source.length!=range.length || selectionReportIsStale(range.start,range.end)) return
+        clearState()
+        val request=Reconversion(range,source,session)
+        reconversion=request
+        candidateLoading=true
+        showCandidates()
+        val choices=if (settings.learningEnabled && learningAllowed) app.learning.state.value.entries else emptyList()
+        reconversionJob=scope.launch {
+            val alternatives=withContext(Dispatchers.Default) {
+                engine.reconvert(source) { reading ->
+                    ensureActive()
+                    JapaneseCandidates.generate(reading,false,48,engine,choices).all
+                }
+            }
+            if (reconversion!==request || request.session!=session || !canReconvert) return@launch
+            if (alternatives.isEmpty()) {
+                cancelReconversion()
+                Toast.makeText(this@DualKeyService,"選択範囲に再変換できる日本語がありません",Toast.LENGTH_SHORT).show()
+                return@launch
+            }
+            candidateLoading=false
+            setCandidateRecords(CandidateLists(alternatives,alternatives))
+            selected=0
+            showCandidates()
+        }
+    }
+
+    private fun cancelReconversion() {
+        if (reconversion==null) return
+        reconversion=null
+        reconversionJob?.cancel()
+        reconversionJob=null
+        candidateLoading=false
+        selected=-1
+        setCandidateRecords(CandidateLists())
+        showCandidates()
+    }
+
+    private fun commitReconversion(request: Reconversion,text: String) {
+        val connection=currentInputConnection ?: return
+        if (!canReconvert || request.session!=session || request.selection!=editorSelection) {
+            cancelReconversion()
+            return
+        }
+        val replaced=runCatching {
+            connection.beginBatchEdit()
+            try {
+                val range=request.selection
+                if (selectionReportIsStale(range.start,range.end) ||
+                    connection.getSelectedText(0)?.toString()!=request.text) false
+                else connection.finishComposingText() && connection.commitText(text,1)
+            } finally { connection.endBatchEdit() }
+        }.getOrDefault(false)
+        if (replaced) editorSelection=null
+        cancelReconversion()
+    }
+
     private fun selectionReportIsStale(start: Int,end: Int): Boolean = runCatching {
         val connection=currentInputConnection ?: return@runCatching false
         if (Build.VERSION.SDK_INT>=31) {

@@ -97,6 +97,67 @@ class JapaneseLexicon private constructor(private val data: ByteBuffer) {
         return result
     }
 
+    /** Match selected spellings against the mapped bytes without decoding the full dictionary. */
+    internal fun reverseMatches(text: String, runs: List<IntRange>): Array<ArrayList<LexiconMatch>> {
+        data class Start(val index: Int, val offset: Int, val bytesLeft: Int)
+        val result = Array(text.length) { arrayListOf<LexiconMatch>() }
+        val selected = text.toByteArray(Charsets.UTF_8)
+        val offsets = IntArray(text.length + 1)
+        val indices = IntArray(selected.size + 1) { -1 }
+        var index = 0
+        var offset = 0
+        while (index < text.length) {
+            offsets[index] = offset
+            indices[offset] = index
+            val end = index + Character.charCount(text.codePointAt(index))
+            offset += text.substring(index, end).toByteArray(Charsets.UTF_8).size
+            index = end
+        }
+        offsets[text.length] = offset
+        indices[offset] = text.length
+        val starts = arrayOfNulls<MutableList<Start>>(65536)
+        for (run in runs) {
+            var start = run.first
+            while (start <= run.last) {
+                val p = offsets[start]
+                val bytesLeft = offsets[run.last + 1] - p
+                if (bytesLeft >= 2) {
+                    val prefix = (selected[p].toInt() and 255) * 256 + (selected[p + 1].toInt() and 255)
+                    val bucket = starts[prefix] ?: arrayListOf<Start>().also { starts[prefix] = it }
+                    bucket.add(Start(start, p, bytesLeft))
+                }
+                start += Character.charCount(text.codePointAt(start))
+            }
+        }
+        if (runs.isEmpty()) return result
+        for (group in 0 until readingCount) {
+            val key = keys + group * 12
+            val first = data.getInt(key + 8)
+            var cachedReading: String? = null
+            for (entry in first until first + short(key + 6)) {
+                val p = entries + entry * 12
+                val length = short(p + 4)
+                if (length < 2 || length > selected.size) continue
+                val value = strings + data.getInt(p)
+                val prefix = (data.get(value).toInt() and 255) * 256 + (data.get(value + 1).toInt() and 255)
+                val positions = starts[prefix] ?: continue
+                for (start in positions) {
+                    if (length > start.bytesLeft) continue
+                    val end = indices[start.offset + length]
+                    if (end < 0) continue
+                    var matched = 2
+                    while (matched < length && selected[start.offset + matched] == data.get(value + matched)) matched++
+                    if (matched == length) {
+                        val yomi = cachedReading ?: reading(group).also { cachedReading = it }
+                        if (yomi.isNotEmpty()) result[start.index].add(LexiconMatch(end,
+                            LexiconWord(yomi, short(p + 6), short(p + 8), data.getShort(p + 10).toInt())))
+                    }
+                }
+            }
+        }
+        return result
+    }
+
     /** Retrieve likely completions in O(limit * log(dictionary size)), including short prefixes. */
     fun predictiveGroups(prefix: String, limit: Int): List<Int> {
         if (prefix.isEmpty()) return emptyList()

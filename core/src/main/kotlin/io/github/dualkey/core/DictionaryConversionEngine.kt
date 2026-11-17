@@ -7,6 +7,10 @@ class DictionaryConversionEngine(
     private val lexicon: JapaneseLexicon,
     private val user: () -> Map<String, List<String>> = { emptyMap() }
 ) : ConversionEngine {
+    companion object {
+        const val MAX_RECONVERSION_LENGTH = JapaneseReconversion.MAX_LENGTH
+    }
+
     private val known=object: LinkedHashMap<String,Set<String>>(64,0.75f,true) {
         override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String,Set<String>>?)=size>64
     }
@@ -182,6 +186,9 @@ class DictionaryConversionEngine(
     fun knownChoice(reading: String,text: String): Boolean = text in user()[reading].orEmpty() || synchronized(known) {
         text in known.getOrPut(reading) { lexicon.exact(reading,10000).map { it.text }.toSet() }
     }
+
+    fun reconvert(text: String, generate: (String) -> List<Candidate>): List<Candidate> =
+        JapaneseReconversion.candidates(text, lexicon, user(), generate)
 
     /** Retain dictionary units only; arbitrary literal/unknown edges are never learned. */
     fun learningUnits(reading: String,text: String): List<Candidate> {

@@ -20,6 +20,19 @@ class JapaneseDictionaryTest {
     private fun words(reading: String, predict: Boolean = false, limit: Int = 30) =
         engine.candidates(reading, predict, limit).map { it.text }
 
+    @Test fun reconversionRecoversReadingsAndKeepsUnchangedSpansAndSeparators() {
+        val converter=engine
+        fun reconvert(text: String) = converter.reconvert(text) { converter.candidates(it,false,48) }.map { it.text }
+        val homophones=reconvert("漢字")
+        assertTrue(homophones.toString(),homophones.containsAll(listOf("感じ","かんじ","カンジ")))
+        assertTrue("漢字" in reconvert("かんじ"))
+        val mixed=reconvert("いい漢字です？ ABC🙂 てんき")
+        assertTrue(mixed.toString(),"いい感じです？ ABC🙂 てんき" in mixed)
+        assertTrue(mixed.toString(),"いい漢字です？ ABC🙂 天気" in mixed)
+        assertTrue(reconvert("ABC ! 🙂").isEmpty())
+        assertTrue(reconvert("あ".repeat(161)).isEmpty())
+    }
+
     @Test fun broadVocabularyAndHomophones() {
         assertTrue(lexicon.entryCount > 1_000_000)
         for ((reading, spelling) in mapOf("かんじる" to "感じる", "ゆうしょう" to "優勝", "けんこう" to "健康",

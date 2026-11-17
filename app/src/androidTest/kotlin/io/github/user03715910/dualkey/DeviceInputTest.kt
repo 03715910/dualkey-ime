@@ -354,6 +354,38 @@ class DeviceInputTest {
         touch(rect("あ行"))
         assertEquals("あ",inputText())
     }
+    @Test fun reconversionReplacesOnlyTheSelectedCommittedText() {
+        val before="前🙂"
+        val after="を直します。"
+        val original=before+"漢字"+after
+        resetPunctuationEditor(original)
+        main { editor.setSelection(before.length,before.length+2) }
+        touch(rect("再変換"))
+        await("homophone available for selected kanji") { findNode { it.text?.toString()=="感じ" }!=null }
+        assertEquals(original,inputText())
+        main { assertEquals("漢字",editor.text.substring(editor.selectionStart,editor.selectionEnd)) }
+        clickLabel("感じ")
+        await("only the highlighted range was replaced") { inputText()==before+"感じ"+after }
+        main { assertEquals(before.length+2,editor.selectionStart); assertEquals(editor.selectionStart,editor.selectionEnd) }
+    }
+    @Test fun reconversionCancelAndSelectionMoveLeaveTheOriginalTextIntact() {
+        val original="漢字と漢字"
+        resetPunctuationEditor(original)
+        main { editor.setSelection(0,2) }
+        clickLabel("再変換")
+        await("reconversion candidates shown") { findNode { it.text?.toString()=="感じ" }!=null }
+        clickLabel("再変換を取り消す")
+        assertEquals(original,inputText())
+        main { assertEquals(0,editor.selectionStart); assertEquals(2,editor.selectionEnd) }
+        clickLabel("再変換")
+        await("reconversion candidates reopened") { findNode { it.text?.toString()=="感じ" }!=null }
+        main { editor.setSelection(3,5) }
+        await("old reconversion candidates cleared") { findNode { it.text?.toString()=="感じ" }==null }
+        assertEquals(original,inputText())
+        clickLabel("再変換")
+        clickLabel("感じ")
+        await("only the newly selected duplicate changes") { inputText()=="漢字と感じ" }
+    }
     @Test fun pasteWorksWithHistoryOffAndToolbarHasNoDuplicateModeButton() {
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
         copy("貼り付け試験"); touch(rect("貼り付け")); assertEquals("貼り付け試験",inputText())
