@@ -58,6 +58,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
     private val keyColor = if (dark) Color.rgb(48,65,72) else Color.WHITE
     private val functionColor = if (dark) Color.rgb(39,54,61) else Color.rgb(236,242,242)
     private var keyHeight = 40
+    private var flickDp = 24
     private var numberHeight = 30
     private var englishMode = false
     private var showNumbers=false
@@ -137,7 +138,10 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         v.layoutParams = LinearLayout.LayoutParams(0,dp(keyHeight),1f).apply { setMargins(dp(2),dp(2),dp(2),dp(2)) }
     }
     private fun button(label: String, action: String, small: Boolean = false, function: Boolean = false,
-        description: String = label) = TextView(context).apply {
+        description: String = label): TextView = (if (action=="delete") {
+        FlickKey(context,listOf("delete","delete_all","","",""),dp(flickDp).toFloat(),feedback,callback,
+            previewEnabled=false,label=label,description=description)
+    } else TextView(context)).apply {
         text = label; contentDescription=description; gravity = Gravity.CENTER; textSize = if (small) 13f else if (function) 16f else 19f
         decorate(this)
         setSingleLine(true)
@@ -157,13 +161,18 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         }
         if (action=="mode") contentDescription=if (englishMode) "日本語に切り替え" else "英語に切り替え"
         isClickable = true
-        setOnClickListener { feedback(this); callback(action) }
-        if (action=="delete" || action=="paste") setOnLongClickListener {
-            callback(if (action=="delete") "delete_chunk" else "clipboard_history"); true
+        if (action=="delete") {
+            contentDescription=description
+            ViewCompat.addAccessibilityAction(this,"入力欄を一括削除") { _,_ -> callback("delete_all"); true }
+            setOnLongClickListener { callback("delete_chunk"); true }
+        } else {
+            setOnClickListener { feedback(this); callback(action) }
+            if (action=="paste") setOnLongClickListener { callback("clipboard_history"); true }
         }
     }
     internal fun rebuild(settings: Settings, english: Boolean, shift: Int, mode: DisplayMode, symbolPage: SymbolPage?, sensitive: Boolean) {
         candidateExpanded=false
+        flickDp=settings.flickDp
         haptics=settings.vibration
         englishMode=english
         // Four key rows in either language. Give digits their own shorter height.

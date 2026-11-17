@@ -945,6 +945,19 @@ class DualKeyService : InputMethodService() {
         } finally { connection.endBatchEdit() }
         refreshCandidates()
     }
+    private fun deleteAllText() {
+        if (!hasEditor()) return
+        val connection=currentInputConnection ?: return
+        clearState()
+        connection.beginBatchEdit()
+        try {
+            // Leaving a composing span active would make commitText replace
+            // that span instead of the editor's select-all range.
+            connection.finishComposingText()
+            if (connection.performContextMenuAction(android.R.id.selectAll)) connection.commitText("",1)
+        } finally { connection.endBatchEdit() }
+        refreshCandidates()
+    }
     // Clipboard history is opt-in and independent of the editor's prediction and learning flags.
     private fun clipboardEligible() = hasEditor() && !sensitive && !numeric &&
         !getSystemService(android.app.KeyguardManager::class.java).isKeyguardLocked
@@ -1366,6 +1379,7 @@ class DualKeyService : InputMethodService() {
             "enter" -> enter()
             "delete" -> delete()
             "delete_chunk" -> deleteChunk()
+            "delete_all" -> deleteAllText()
             "cursor_left" -> moveCursor(-1)
             "cursor_right" -> moveCursor(1)
             "modify" -> modifyKana()

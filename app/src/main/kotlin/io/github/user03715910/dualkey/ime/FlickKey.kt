@@ -17,6 +17,10 @@ class FlickKey(context: Context, private val values: List<String>, private val t
     private var activePointer = -1
     private var popup: PopupWindow? = null
     private var preview: FlickPreviewBubble? = null
+    private val touchSlop = ViewConfiguration.get(context).scaledTouchSlop
+    private val longPress = Runnable {
+        if (activePointer>=0 && direction==0 && performLongClick()) finishGesture()
+    }
     init {
         // Keep the resting key legible and compact; directions appear while touching.
         text = label
@@ -36,6 +40,7 @@ class FlickKey(context: Context, private val values: List<String>, private val t
                 downX = event.x; downY = event.y; direction = 0
                 isPressed = true; feedback(this)
                 parent.requestDisallowInterceptTouchEvent(true)
+                if (isLongClickable) postDelayed(longPress, ViewConfiguration.getLongPressTimeout().toLong())
                 if (previewEnabled) {
                     val bubble=FlickPreviewBubble(context,values)
                     preview=bubble
@@ -65,16 +70,29 @@ class FlickKey(context: Context, private val values: List<String>, private val t
             MotionEvent.ACTION_MOVE -> {
                 val index = event.findPointerIndex(activePointer)
                 if (index < 0) return true
-                val next = directionAt(event.getX(index),event.getY(index))
+                val x=event.getX(index); val y=event.getY(index)
+                if (isLongClickable && maxOf(abs(x-downX),abs(y-downY))>touchSlop) removeCallbacks(longPress)
+                val next = directionAt(x,y)
                 if (next != direction) { direction = next; updatePreview() }
             }
-            MotionEvent.ACTION_UP -> { if (activePointer<0) return true; direction=directionAt(event.x,event.y); popup?.dismiss(); popup = null; preview=null; isPressed = false; performClick(); direction = 0; activePointer = -1 }
-            MotionEvent.ACTION_CANCEL -> { popup?.dismiss(); popup = null; preview=null; isPressed = false; direction = 0; activePointer = -1 }
-            MotionEvent.ACTION_POINTER_UP -> if (event.getPointerId(event.actionIndex)==activePointer) {
-                popup?.dismiss(); popup=null; preview=null; isPressed=false; direction=0; activePointer=-1
+            MotionEvent.ACTION_UP -> {
+                if (activePointer<0) return true
+                val releasedDirection=directionAt(event.x,event.y)
+                finishGesture()
+                direction=releasedDirection
+                performClick()
+                direction=0
             }
+            MotionEvent.ACTION_CANCEL -> finishGesture()
+            MotionEvent.ACTION_POINTER_DOWN -> if (isLongClickable) finishGesture()
+            MotionEvent.ACTION_POINTER_UP -> if (event.getPointerId(event.actionIndex)==activePointer) finishGesture()
         }
         return true
+    }
+    private fun finishGesture() {
+        removeCallbacks(longPress)
+        popup?.dismiss(); popup=null; preview=null
+        isPressed=false; direction=0; activePointer=-1
     }
     private fun updatePreview() { preview?.select(direction) }
     private fun directionAt(x: Float,y: Float): Int {
@@ -83,5 +101,5 @@ class FlickKey(context: Context, private val values: List<String>, private val t
             else if (abs(dx)>abs(dy)) { if (dx<0) 1 else 3 } else { if (dy<0) 2 else 4 }
     }
     override fun performClick(): Boolean { super.performClick(); values[direction].takeIf { it.isNotEmpty() }?.let(input); return true }
-    override fun onDetachedFromWindow() { popup?.dismiss(); popup = null; preview=null; super.onDetachedFromWindow() }
+    override fun onDetachedFromWindow() { finishGesture(); super.onDetachedFromWindow() }
 }

@@ -295,6 +295,28 @@ class DeviceInputTest {
         hold(rect("⌫")); assertEquals("あ。い、後ろ",inputText())
         main { editor.setSelection(0,2) }; hold(rect("⌫")); assertEquals("い、後ろ",inputText())
     }
+    @Test fun deleteLeftFlickClearsTheEntireFieldAcrossTheCursorAndSelection() {
+        val text="前".repeat(2200)+"🙂\n"+"後".repeat(2200)
+        resetPunctuationEditor(text,InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
+        main { editor.setSelection(2200,2202) }
+        val distance=(activity.resources.displayMetrics.density*70).toInt()
+        touch(rect("⌫"),dy=-distance)
+        assertEquals("An upward flick leaves the input intact",text,inputText())
+        touch(rect("⌫"),dx=-distance)
+        await("all text cleared on both sides of the selection") { inputText().isEmpty() }
+        touch(rect("⌫"),dx=-distance)
+        assertEquals("",inputText())
+    }
+    @Test fun deleteLeftFlickClearsBothConfirmedAndComposingText() {
+        resetPunctuationEditor("確定済み。")
+        letters("KANA")
+        assertEquals("確定済み。かな",inputText())
+        val distance=(activity.resources.displayMetrics.density*70).toInt()
+        touch(rect("⌫"),dx=-distance)
+        await("whole field cleared with composition active") { inputText().isEmpty() }
+        touch(rect("あ行"))
+        assertEquals("あ",inputText())
+    }
     @Test fun pasteWorksWithHistoryOffAndToolbarHasNoDuplicateModeButton() {
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
         copy("貼り付け試験"); touch(rect("貼り付け")); assertEquals("貼り付け試験",inputText())
