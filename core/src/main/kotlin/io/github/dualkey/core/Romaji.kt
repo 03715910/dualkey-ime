@@ -23,6 +23,7 @@ object Romaji {
     }
     private val prefixes = table.keys.flatMap { k -> (1 until k.length).map { k.take(it) } }.toSet()
     private const val sokuonInitials = "bcdfghjkmprstvyz"
+    private val vowelBetweenDoubleN = Regex("nn[aiueo]nn", RegexOption.IGNORE_CASE)
 
     private fun syllableAt(text: String, start: Int): String? {
         for (length in minOf(4, text.length - start) downTo 1) {
@@ -32,7 +33,17 @@ object Romaji {
         return null
     }
 
-    fun convert(raw: String, flush: Boolean = false, preserveAsciiBangAndQuestion: Boolean = false): String = buildString {
+    fun convert(raw: String, flush: Boolean = false, preserveAsciiBangAndQuestion: Boolean = false): String =
+        convert(raw, flush, preserveAsciiBangAndQuestion, standaloneVowel = true)
+
+    internal fun alternateReading(raw: String, preserveAsciiBangAndQuestion: Boolean): String? {
+        if (!vowelBetweenDoubleN.containsMatchIn(raw)) return null
+        val alternate = convert(raw, true, preserveAsciiBangAndQuestion, standaloneVowel = false)
+        return alternate.takeUnless { it == convert(raw, true, preserveAsciiBangAndQuestion) }
+    }
+
+    private fun convert(raw: String, flush: Boolean, preserveAsciiBangAndQuestion: Boolean,
+        standaloneVowel: Boolean): String = buildString {
         val s = raw.lowercase()
         var i = 0
         while (i < s.length) {
@@ -55,6 +66,8 @@ object Romaji {
                     val afterPair = s.getOrNull(i + 2)
                     i += when {
                         afterPair == '\'' -> 3
+                        // Two explicit pairs can delimit a vowel, as in ge-nn-i-nn.
+                        standaloneVowel && afterPair != null && afterPair in "aiueo" && s.startsWith("nn", i + 3) -> 2
                         afterPair != null && (syllableAt(s, i + 1) != null || s.substring(i + 1) in prefixes) -> 1
                         else -> 2
                     }
@@ -75,6 +88,7 @@ class Composer(private val preserveAsciiBangAndQuestion: Boolean = false) {
     private val raw = StringBuilder()
     val text get() = Romaji.convert(raw.toString(), preserveAsciiBangAndQuestion = preserveAsciiBangAndQuestion)
     val reading get() = Romaji.convert(raw.toString(), flush = true, preserveAsciiBangAndQuestion = preserveAsciiBangAndQuestion)
+    val alternateReading get() = Romaji.alternateReading(raw.toString(), preserveAsciiBangAndQuestion)
     val isEmpty get() = raw.isEmpty()
     fun append(value: String) { raw.append(value) }
     fun delete(): Boolean {

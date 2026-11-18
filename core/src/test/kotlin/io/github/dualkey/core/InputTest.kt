@@ -59,6 +59,29 @@ class InputTest {
         assertEquals("わ", composer.reading)
     }
 
+    @Test fun twoExplicitDoubleNsCanEncloseAVowelWithoutLosingTheOtherReading() {
+        val composer = Composer()
+        for ((keys, reading, alternate) in listOf(
+            Triple("genninn", "げんいん", "げんにん"),
+            Triple("genninnga", "げんいんが", "げんにんが"),
+            Triple("tenninn", "てんいん", "てんにん"),
+            Triple("sennenn", "せんえん", "せんねん")
+        )) {
+            composer.replace(keys)
+            assertEquals(keys, reading, composer.text)
+            assertEquals(keys, reading, composer.reading)
+            assertEquals(keys, alternate, composer.alternateReading)
+        }
+        composer.replace("konnichiha")
+        assertEquals("こんにちは", composer.reading)
+        assertNull(composer.alternateReading)
+        composer.replace("genninn")
+        assertTrue(composer.delete())
+        assertEquals("げんい", composer.reading)
+        composer.append("nn")
+        assertEquals("げんいん", composer.reading)
+    }
+
     private fun assertRomajiSteps(keys: String, displays: List<String>) {
         val composer = Composer()
         keys.forEachIndexed { index, key ->

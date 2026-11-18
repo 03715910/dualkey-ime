@@ -1114,6 +1114,55 @@ class DeviceInputTest {
         assertNull(hardwareNode("物理キーボードの候補一覧"))
         main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
     }
+    @Test fun physicalSpaceReopensConversionForSelectedTextWithScreenKeyboardHidden() {
+        resetPunctuationEditor("前漢字後")
+        ImeControl.request(DisplayMode.HIDDEN)
+        await("screen keyboard hidden") { imeHeight()==0 }
+        main { editor.setSelection(1,3) }
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+        key(KeyEvent.KEYCODE_SPACE)
+        await("selected kanji candidates") { hardwareNode("物理候補：感じ")?.isSelected==true }
+        assertCandidateOnly()
+        assertEquals("前漢字後",inputText())
+        main { assertEquals(1,editor.selectionStart); assertEquals(3,editor.selectionEnd) }
+        key(KeyEvent.KEYCODE_SPACE)
+        await("next reconversion candidate") { hardwareNode("物理候補：感じ")?.isSelected==false }
+        assertEquals("前漢字後",inputText())
+        key(KeyEvent.KEYCODE_ESCAPE)
+        await("Esc closes reconversion") { hardwareNode("物理キーボードの候補一覧")==null }
+        assertEquals("前漢字後",inputText())
+        key(KeyEvent.KEYCODE_SPACE)
+        await("reconversion can reopen") { hardwareNode("物理候補：感じ")?.isSelected==true }
+        key(KeyEvent.KEYCODE_ENTER)
+        await("Enter replaces only the selected text") {
+            inputText()=="前感じ後" && hardwareNode("物理キーボードの候補一覧")==null
+        }
+        assertCandidateOnly()
+    }
+    @Test fun physicalSpaceUsesTheWidthOfTheInputLanguage() {
+        resetPunctuationEditor("日本語")
+        key(KeyEvent.KEYCODE_SPACE)
+        assertEquals("日本語　",inputText())
+        key(KeyEvent.KEYCODE_EISU)
+        letters("ABC")
+        key(KeyEvent.KEYCODE_SPACE)
+        assertEquals("日本語　abc ",inputText())
+        key(KeyEvent.KEYCODE_KANA)
+        key(KeyEvent.KEYCODE_SPACE)
+        assertEquals("日本語　abc 　",inputText())
+        touch(rect("空白"))
+        assertEquals("日本語　abc 　 ",inputText())
+    }
+    @Test fun physicalRomajiConvertsGenninnToGeninAndKeepsGenNinAsAnAlternative() {
+        letters("GENNINN")
+        assertEquals("げんいん",inputText())
+        key(KeyEvent.KEYCODE_SPACE)
+        await("原因 is selected") { inputText()=="原因" && hardwareNode("物理候補：原因")?.isSelected==true }
+        assertTrue("The other reading stays reachable",
+            listOf("現任","原任","げんにん").any { hardwareNode("物理候補：$it")!=null })
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("原因",inputText())
+    }
     @Test fun hiddenHardwareConversionShowsOnlyTheCandidateWindowAndAllowsTouch() {
         ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
         letters("KYOU"); key(KeyEvent.KEYCODE_HENKAN)

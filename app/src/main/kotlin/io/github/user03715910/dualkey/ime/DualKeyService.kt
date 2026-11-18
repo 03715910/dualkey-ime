@@ -29,7 +29,7 @@ class DualKeyService : InputMethodService() {
     private val composer = Composer(preserveAsciiBangAndQuestion = true)
     private val visibility = VisibilityController()
     private val conversion get() = app.japaneseDictionary.engine.value
-    private data class CandidateQuery(val reading: String, val prediction: Boolean, val limit: Int,
+    private data class CandidateQuery(val reading: String, val alternateReading: String?, val prediction: Boolean, val limit: Int,
         val dictionary: Map<String, List<String>>, val engine: ConversionEngine, val learning: LearningSnapshot,
         val semantic: JapaneseLexicon?,val symbols: Map<String,List<String>>,val context: Candidate?,
         val expressions: ExpressionCandidates,val emoji: Boolean,val face: Boolean)
@@ -79,6 +79,7 @@ class DualKeyService : InputMethodService() {
     private var lastShift = 0L
     private var symbolPage: SymbolPage? = null
     private var sensitive = false
+    private var forceAsciiInput = false
     private var asciiPunctuation = false
     private var predictionsAllowed = true
     private var japaneseConversionAllowed = false
@@ -130,9 +131,10 @@ class DualKeyService : InputMethodService() {
     private var editorSelection: EditorSelection?=null
     private var reconversion: Reconversion?=null
     private var reconversionJob: Job?=null
-    private val canReconvert get()=windowShown && isInputViewShown && visibility.mode!=DisplayMode.HIDDEN &&
-        hasEditor() && japaneseConversionAllowed && !asciiPunctuation &&
-        editorSelection!=null && composer.isEmpty && englishWord.isEmpty()
+    private val selectionConversionAllowed get()=hasEditor() && japaneseConversionAllowed &&
+        !forceAsciiInput && composer.isEmpty && englishWord.isEmpty()
+    private fun canReconvert(physical: Boolean) = selectionConversionAllowed && editorSelection!=null &&
+        (physical || !asciiPunctuation && windowShown && isInputViewShown && visibility.mode!=DisplayMode.HIDDEN)
     private var blockedClipTimestamp=-1L
     private val clipboardListener=ClipboardManager.OnPrimaryClipChangedListener {
         if (hasEditor() && !clipboardEligible()) {
@@ -366,7 +368,8 @@ class DualKeyService : InputMethodService() {
             InputType.TYPE_TEXT_VARIATION_WEB_EMAIL_ADDRESS, InputType.TYPE_TEXT_VARIATION_URI)
         val asciiRequested = attribute.imeOptions and EditorInfo.IME_FLAG_FORCE_ASCII != 0
         val privateMode = attribute.imeOptions and EditorInfo.IME_FLAG_NO_PERSONALIZED_LEARNING != 0
-        asciiPunctuation = sensitive || numeric || addressField || asciiRequested || privateMode
+        forceAsciiInput = sensitive || numeric || addressField || asciiRequested
+        asciiPunctuation = forceAsciiInput || privateMode
         // Editors may provide their own completions. Kana-to-kanji conversion still
         // needs local candidates to turn the composing reading into Japanese text.
         japaneseConversionAllowed = inputStarted && !sensitive && klass == InputType.TYPE_CLASS_TEXT
@@ -532,14 +535,16 @@ class DualKeyService : InputMethodService() {
         if (japaneseConversionAllowed && !english && !composer.isEmpty &&
             (converting || settings.japanesePrediction && (!hardwareComposition || hardwarePredictionOpen))) {
             if (requestedReading!=composer.reading) { requestedReading=composer.reading; requestedLimit=maxOf(64,settings.candidateCount) }
-            val query=CandidateQuery(composer.reading,!converting && predictionsAllowed && settings.japanesePrediction,
+            val query=CandidateQuery(composer.reading,if (converting) composer.alternateReading else null,
+                !converting && predictionsAllowed && settings.japanesePrediction,
                 maxOf(settings.candidateCount,requestedLimit),settings.dictionary,conversion,
                 if (app.settings.isLoaded && settings.learningEnabled && learningAllowed) app.learning.state.value else LearningSnapshot(),
                 app.semanticDictionary.lexicon.value,app.symbols.entries.value,
                 committedTail?.takeIf { contextAllowed }?.word,
                 app.expressions.entries.value,settings.emojiPrediction,settings.facePrediction)
             if (candidateQuery!=query || (converting && candidateLoading)) {
-                val retain=candidateQuery?.let { it.reading==query.reading && it.prediction==query.prediction }==true
+                val retain=candidateQuery?.let { it.reading==query.reading && it.alternateReading==query.alternateReading &&
+                    it.prediction==query.prediction }==true
                 candidateJob?.cancel(); candidateQuery=query; candidateLoading=false
                 if (converting && query.limit<=100) {
                     // Space/Enter stays ordered even when pressed immediately after typing.
@@ -573,10 +578,18 @@ class DualKeyService : InputMethodService() {
         }
         showCandidates()
     }
-    private fun personalized(query: CandidateQuery): CandidateLists = JapaneseCandidates.generate(
-        query.reading, query.prediction, query.limit, query.engine, query.learning.entries, query.learning.continuations,
-        query.semantic, query.symbols, query.expressions, query.emoji, query.face, query.context,
-    )
+    private fun personalized(query: CandidateQuery): CandidateLists {
+        fun generate(reading: String) = JapaneseCandidates.generate(
+            reading, query.prediction, query.limit, query.engine, query.learning.entries, query.learning.continuations,
+            query.semantic, query.symbols, query.expressions, query.emoji, query.face, query.context,
+        )
+        val primary=generate(query.reading)
+        val alternative=query.alternateReading?.let(::generate) ?: return primary
+        fun combine(base: List<Candidate>) = mergeCandidates(
+            base.take(3)+alternative.exact.take(3)+base.drop(3)+alternative.exact.drop(3)
+        ).take(query.limit)
+        return primary.copy(all=combine(primary.all),exact=combine(primary.exact))
+    }
     private fun setCandidateRecords(values: List<Candidate>) {
         setCandidateRecords(CandidateLists(values,
             values.filter { english && it.directlyMatches(englishWord) },
@@ -628,7 +641,7 @@ class DualKeyService : InputMethodService() {
         val needsCandidateHost=visibility.mode==DisplayMode.HIDDEN || !editorRequested
         if (!hardwareCandidates || !hasEditor() || sensitive || english || !japaneseConversionAllowed ||
             (continuationCandidates && selected !in candidates.indices) ||
-            (!converting && !continuationCandidates && !hardwarePredictionOpen) || candidateLists.all.isEmpty()) {
+            (!converting && !continuationCandidates && !hardwarePredictionOpen && reconversion==null) || candidateLists.all.isEmpty()) {
             val thinHost=needsCandidateHost && settings.hideImeCaption
             closeHardwarePanel(releaseHost=thinHost && (!hardwareCandidates || !hasEditor() || !candidateLoading))
             return
@@ -647,11 +660,12 @@ class DualKeyService : InputMethodService() {
         val host=window?.window?.decorView ?: return
         val top=visibleKeyboard()?.let { view -> IntArray(2).also(view::getLocationOnScreen)[1] }
         val title=when {
+            reconversion!=null -> "再変換候補"
             continuationCandidates -> "続きの予測"
             hardwarePredictionOpen -> "入力中の予測"
             else -> "変換候補"
         }
-        hardwarePanel.show(host,candidateRecords,selected,title,hardwareMode.takeUnless { continuationCandidates },top,
+        hardwarePanel.show(host,candidateRecords,selected,title,hardwareMode.takeUnless { continuationCandidates || reconversion!=null },top,
             needsCandidateHost && settings.hideImeCaption,canLoadMoreHardwareCandidates())
     }
     private fun retryCandidateHost() {
@@ -879,10 +893,18 @@ class DualKeyService : InputMethodService() {
     private fun switchMode(toEnglish: Boolean = !english) {
         invalidateTranslation(); commitComposition(); committedTail=null; finishEnglish(); english=toEnglish; shift=0; resetConversion(); rebuild(); refreshCandidates()
     }
-    private fun space() {
+    private fun space(physical: Boolean=false) {
+        if (physical && requestHardwareReconversion()) return
         invalidateTranslation()
         resetVariant()
-        if (english || sensitive || numeric || composer.isEmpty) { committedTail=null; finishEnglish(); currentInputConnection?.commitText(" ",1); refreshCandidates(); return }
+        if (english || sensitive || numeric || composer.isEmpty) {
+            committedTail=null
+            finishEnglish()
+            val blank=if (physical && !english && !forceAsciiInput) "　" else " "
+            currentInputConnection?.commitText(blank,1)
+            refreshCandidates()
+            return
+        }
         if (!converting) {
             converting=true; hardwareMode=CandidateMode.ALL
             refreshCandidates(); selected=0
@@ -894,6 +916,10 @@ class DualKeyService : InputMethodService() {
         syncComposition()
     }
     private fun enter(physical: Boolean=false,shiftPressed: Boolean=false) {
+        if (physical && !shiftPressed && hardwareCandidates && reconversion!=null) {
+            commitCandidate(selected)
+            return
+        }
         invalidateTranslation()
         val info=currentInputEditorInfo
         val action=(info?.imeOptions ?: 0) and EditorInfo.IME_MASK_ACTION
@@ -1487,13 +1513,17 @@ class DualKeyService : InputMethodService() {
             keyCode==KeyEvent.KEYCODE_KANA || keyCode==KeyEvent.KEYCODE_KATAKANA_HIRAGANA -> switchMode(false)
             keyCode==KeyEvent.KEYCODE_HENKAN && !english -> {
                 if (!composer.isEmpty) { hardwareCandidates=true; space() }
+                else requestHardwareReconversion()
             }
             keyCode==KeyEvent.KEYCODE_MUHENKAN && !english && !composer.isEmpty -> {
                 hardwareCandidates=false
                 invalidateTranslation(); resetVariant(); resetConversion(); syncComposition()
             }
             event.isCtrlPressed || event.isAltPressed || event.isMetaPressed -> { commitComposition(); committedTail=null; finishEnglish(); handled=false }
-            keyCode==KeyEvent.KEYCODE_SPACE -> { hardwareCandidates=!english && !composer.isEmpty; space() }
+            keyCode==KeyEvent.KEYCODE_SPACE -> {
+                if (!composer.isEmpty) hardwareCandidates=!english
+                space(physical=true)
+            }
             keyCode==KeyEvent.KEYCODE_F6 && hardwareCandidates && converting && candidateLists.all.isNotEmpty() -> {
                 if (event.repeatCount==0) {
                     val modes=CandidateMode.entries
@@ -1536,9 +1566,10 @@ class DualKeyService : InputMethodService() {
                 val vertical=keyCode==KeyEvent.KEYCODE_DPAD_UP || keyCode==KeyEvent.KEYCODE_DPAD_DOWN
                 val chooseContinuation=continuationCandidates && (visibility.mode!=DisplayMode.HIDDEN || hardwareCandidates) &&
                     (selected>=0 || vertical)
-                if (candidates.isNotEmpty() && (converting || chooseContinuation || hardwarePredictionOpen && vertical)) {
+                val chooseReconversion=hardwareCandidates && reconversion!=null && vertical && !event.isShiftPressed
+                if (candidates.isNotEmpty() && (converting || chooseContinuation || hardwarePredictionOpen && vertical || chooseReconversion)) {
                     stepHardwareCandidate(if (keyCode==KeyEvent.KEYCODE_DPAD_LEFT || keyCode==KeyEvent.KEYCODE_DPAD_UP) -1 else 1)
-                } else if (hardwarePredictionOpen && vertical && candidateLoading) {
+                } else if (chooseReconversion || hardwarePredictionOpen && vertical && candidateLoading) {
                     // A quick Down while suggestions are being computed should not commit the kana.
                     handled=true
                 } else { commitComposition(); committedTail=null; finishEnglish(); refreshCandidates(); handled=false }
@@ -1584,37 +1615,76 @@ class DualKeyService : InputMethodService() {
     private fun editorSelection(start: Int,end: Int): EditorSelection? =
         if (start>=0 && end>=0 && start!=end) EditorSelection(start,end) else null
 
-    private fun scheduleReconversion() {
-        if (!canReconvert || reconversion!=null || reconversionJob?.isActive==true) return
+    private fun requestHardwareReconversion(): Boolean {
+        if (english || !selectionConversionAllowed) return false
+        val connection=currentInputConnection ?: return false
+        val source=runCatching { connection.getSelectedText(0)?.toString() }.getOrNull()
+        // A Space arriving before updateSelection must still protect the highlighted text.
+        if (source.isNullOrEmpty() && editorSelection==null) return false
+        val bounds=selectionBounds(connection)
+        val range=if (bounds!=null) editorSelection(bounds.first,bounds.second) else editorSelection
+        if (source.isNullOrEmpty()) return range!=null
+        if (range==null || range.length!=source.length) return true
+        val request=Reconversion(range,source,session)
+        if (reconversion==request) {
+            if (candidates.isNotEmpty()) stepHardwareCandidate(1)
+        } else {
+            editorSelection=range
+            scheduleReconversion(request)
+        }
+        return true
+    }
+
+    private fun scheduleReconversion(explicit: Reconversion?=null) {
+        val physical=explicit!=null
+        if (!canReconvert(physical) || !physical && (reconversion!=null || reconversionJob?.isActive==true)) return
         val range=editorSelection ?: return
+        if (physical) invalidateTranslation()
         if (range.length>DictionaryConversionEngine.MAX_RECONVERSION_LENGTH) return
         val engine=conversion as? DictionaryConversionEngine ?: return
         val editorSession=session
-        reconversionJob=scope.launch {
-            // Dragging a selection handle can report many intermediate ranges.
-            delay(120)
-            if (!canReconvert || session!=editorSession || editorSelection!=range) return@launch
-            val connection=currentInputConnection ?: return@launch
-            val source=runCatching { connection.getSelectedText(0)?.toString() }.getOrNull()
-            if (source.isNullOrBlank() || source.length!=range.length || selectionReportIsStale(range.start,range.end)) return@launch
-            val choices=if (settings.learningEnabled && learningAllowed) app.learning.state.value.entries else emptyList()
-            val alternatives=withContext(Dispatchers.Default) {
-                engine.reconvert(source) { reading ->
-                    ensureActive()
-                    JapaneseCandidates.generate(reading,false,48,engine,choices).all
-                }
-            }
-            if (alternatives.isEmpty() || !canReconvert || session!=editorSession || editorSelection!=range) return@launch
-            candidateJob?.cancel()
-            candidateQuery=null
-            candidateLoading=false
-            committedTail=null
-            continuationCandidates=false
-            reconversion=Reconversion(range,source,editorSession)
-            selected=-1
-            setCandidateRecords(CandidateLists(alternatives,alternatives))
+        if (explicit!=null) {
+            prepareReconversion(explicit)
+            hardwareCandidates=true
+            hardwareMode=CandidateMode.ALL
+            candidateLoading=true
+            setCandidateRecords(CandidateLists())
             showCandidates()
         }
+        reconversionJob=scope.launch {
+            try {
+                // Dragging a selection handle can report many intermediate ranges.
+                if (!physical) delay(120)
+                if (!canReconvert(physical) || session!=editorSession || editorSelection!=range) return@launch
+                val connection=currentInputConnection ?: return@launch
+                val source=explicit?.text ?: runCatching { connection.getSelectedText(0)?.toString() }.getOrNull()
+                if (source.isNullOrBlank() || source.length!=range.length || selectionReportIsStale(range.start,range.end)) return@launch
+                val choices=if (settings.learningEnabled && learningAllowed) app.learning.state.value.entries else emptyList()
+                val alternatives=withContext(Dispatchers.Default) {
+                    engine.reconvert(source) { reading ->
+                        ensureActive()
+                        JapaneseCandidates.generate(reading,false,48,engine,choices).all
+                    }
+                }
+                if (alternatives.isEmpty() || !canReconvert(physical) || session!=editorSession || editorSelection!=range) return@launch
+                prepareReconversion(explicit ?: Reconversion(range,source,editorSession))
+                candidateLoading=false
+                setCandidateRecords(CandidateLists(alternatives,alternatives))
+                if (physical) selected=0
+                showCandidates()
+            } finally {
+                if (explicit!=null && reconversion===explicit && candidateLoading) cancelReconversion()
+            }
+        }
+    }
+
+    private fun prepareReconversion(request: Reconversion) {
+        candidateJob?.cancel()
+        candidateQuery=null
+        committedTail=null
+        continuationCandidates=false
+        reconversion=request
+        selected=-1
     }
 
     private fun cancelReconversion() {
@@ -1622,6 +1692,7 @@ class DualKeyService : InputMethodService() {
         reconversionJob=null
         if (reconversion==null) return
         reconversion=null
+        hardwareCandidates=false
         candidateLoading=false
         selected=-1
         setCandidateRecords(CandidateLists())
@@ -1630,7 +1701,7 @@ class DualKeyService : InputMethodService() {
 
     private fun commitReconversion(request: Reconversion,text: String) {
         val connection=currentInputConnection ?: return
-        if (!canReconvert || request.session!=session || request.selection!=editorSelection) {
+        if (!canReconvert(hardwareCandidates) || request.session!=session || request.selection!=editorSelection) {
             cancelReconversion()
             return
         }
@@ -1647,17 +1718,20 @@ class DualKeyService : InputMethodService() {
         cancelReconversion()
     }
 
-    private fun selectionReportIsStale(start: Int,end: Int): Boolean = runCatching {
-        val connection=currentInputConnection ?: return@runCatching false
+    private fun selectionReportIsStale(start: Int,end: Int): Boolean =
+        currentInputConnection?.let(::selectionBounds)?.let { it.first!=start || it.second!=end } ?: false
+
+    private fun selectionBounds(connection: InputConnection): Pair<Int,Int>? = runCatching {
         if (Build.VERSION.SDK_INT>=31) {
             val position=connection.getSurroundingText(0,0,0)
             if (position!=null && position.offset>=0) return@runCatching (
-                position.offset+position.selectionStart!=start || position.offset+position.selectionEnd!=end)
+                (position.offset+position.selectionStart) to (position.offset+position.selectionEnd))
         }
         val extracted=connection.getExtractedText(ExtractedTextRequest().apply { hintMaxChars=1; hintMaxLines=1 },0)
-            ?: return@runCatching false
-        extracted.startOffset+extracted.selectionStart!=start || extracted.startOffset+extracted.selectionEnd!=end
-    }.getOrDefault(false)
+            ?: return@runCatching null
+        if (extracted.selectionStart<0 || extracted.selectionEnd<0) null
+        else (extracted.startOffset+extracted.selectionStart) to (extracted.startOffset+extracted.selectionEnd)
+    }.getOrNull()
     private fun translationMenu() {
         if (sensitive || numeric) return
         invalidateTranslation()
