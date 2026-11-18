@@ -1,6 +1,23 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 39,
+    "versionName": "0.1.36",
+    "releaseDate": "2026-11-18",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.36/DualKeyIME-0.1.36.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "b7516700b574396a920a10c7377470f9fc4ec8ec763ab7bd01359a87a5eaaf85",
+    "sizeBytes": 101804123,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "ローマ字入力の genninn から「げんいん」「原因」へ変換できるようにしました。",
+      "物理キーボードで確定済みの日本語を選択し、Spaceを押すと再変換できます。",
+      "物理キーボードで空白を入れると、日本語モードでは全角、英語モードでは半角になります。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 38,
     "versionName": "0.1.35",
     "releaseDate": "2026-11-17",
