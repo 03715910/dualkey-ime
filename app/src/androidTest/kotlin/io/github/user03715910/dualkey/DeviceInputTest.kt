@@ -941,10 +941,10 @@ class DeviceInputTest {
         key(KeyEvent.KEYCODE_ENTER); assertEquals("wwwん",inputText())
         key(KeyEvent.KEYCODE_DEL); assertEquals("www",inputText())
         letters("NNK"); key(KeyEvent.KEYCODE_DEL); assertEquals("wwwん",inputText())
-        letters("A"); assertEquals("wwwんな",inputText())
+        letters("A"); assertEquals("wwwんあ",inputText())
         key(KeyEvent.KEYCODE_ZENKAKU_HANKAKU)
-        letters("WW"); assertEquals("wwwんなww",inputText())
-        key(KeyEvent.KEYCODE_SPACE); assertEquals("wwwんなww ",inputText())
+        letters("WW"); assertEquals("wwwんあww",inputText())
+        key(KeyEvent.KEYCODE_SPACE); assertEquals("wwwんあww ",inputText())
     }
 
     @Test fun screenQwertyUsesTheSameRomajiRules() {
@@ -983,7 +983,7 @@ class DeviceInputTest {
     }
 
     @Test fun punctuationFollowsTextForPhysicalAndScreenKeys() {
-        letters("KONNICHIWA")
+        letters("KONNNICHIWA")
         clickLabel("こんにちは")
         key(KeyEvent.KEYCODE_1, KeyEvent.META_SHIFT_ON)
         assertEquals("こんにちは！", inputText())
@@ -1162,6 +1162,46 @@ class DeviceInputTest {
             listOf("現任","原任","げんにん").any { hardwareNode("物理候補：$it")!=null })
         key(KeyEvent.KEYCODE_ENTER)
         assertEquals("原因",inputText())
+    }
+    @Test fun physicalDoubleNInputNeverShowsNiBeforeTheIndependentVowel() {
+        val observed=mutableListOf<String>()
+        val watcher=object : android.text.TextWatcher {
+            override fun beforeTextChanged(s: CharSequence?,start: Int,count: Int,after: Int) {}
+            override fun onTextChanged(s: CharSequence?,start: Int,before: Int,count: Int) { observed.add(s.toString()) }
+            override fun afterTextChanged(s: android.text.Editable?) {}
+        }
+        main { editor.addTextChangedListener(watcher) }
+        try {
+            val expected=listOf("g","げ","げn","げん","げんい","げんいn","げんいん")
+            "GENNINN".forEachIndexed { index,key ->
+                letters(key.toString())
+                assertEquals("visible after ${index+1} keys",expected[index],inputText())
+                main { assertFalse("An intermediate editor update showed に: $observed",observed.any { it.startsWith("げんに") }) }
+            }
+        } finally { main { editor.removeTextChangedListener(watcher) } }
+        key(KeyEvent.KEYCODE_SPACE)
+        assertEquals("原因",inputText())
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("原因",inputText())
+        resetPunctuationEditor()
+        letters("GENN")
+        assertEquals("げん",inputText())
+        key(KeyEvent.KEYCODE_2)
+        assertEquals("げん2",inputText())
+    }
+    @Test fun screenDoubleNInputShowsTheIndependentVowelImmediately() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.japaneseLayout,"QWERTY"); app.settings.state.first { it.japaneseQwerty } }
+        val expected=listOf("g","げ","げn","げん","げんい","げんいn","げんいん")
+        "genninn".forEachIndexed { index,key ->
+            touch(rect(key.toString()))
+            assertEquals("screen input after ${index+1} keys",expected[index],inputText())
+        }
+        touch(rect("↵"))
+        assertEquals("げんいん",inputText())
+        resetPunctuationEditor()
+        touch(rect("n")); touch(rect("n")); touch(rect("i"))
+        assertEquals("んい",inputText())
     }
     @Test fun hiddenHardwareConversionShowsOnlyTheCandidateWindowAndAllowsTouch() {
         ImeControl.request(DisplayMode.HIDDEN); await("IME hidden") { imeHeight()==0 }
@@ -1624,7 +1664,7 @@ class DeviceInputTest {
             "n=${sorted.size} median_ms=${sorted[sorted.size/2]} p95_ms=${sorted[(sorted.size*95+99)/100-1]} pss_kib=${memory.totalPss}")
     }
     @Test fun physicalContractedGeminatedAndN() {
-        letters("KYONIHONGOSHACHATTANNA"); await("romaji sequence") { inputText()=="きょにほんごしゃちゃったんな" }
+        letters("KYONIHONGOSHACHATTANNNA"); await("romaji sequence") { inputText()=="きょにほんごしゃちゃったんな" }
         key(KeyEvent.KEYCODE_ENTER); assertEquals("きょにほんごしゃちゃったんな",inputText())
     }
     @Test fun candidateArrowEscapeAndBackspace() {
@@ -1859,7 +1899,7 @@ class DeviceInputTest {
         val engine=io.github.user03715910.dualkey.translation.TranslationEngine()
         try { Assume.assumeTrue("Download the model with TranslationDeviceTest first",runBlocking { engine.ready() }) }
         finally { engine.close() }
-        letters("KONNICHIHA"); assertEquals("こんにちは",inputText())
+        letters("KONNNICHIHA"); assertEquals("こんにちは",inputText())
         clickLabel("翻訳"); clickLabel("Googleで日→英"); clickLabel("この訳を入力")
         await("translated text committed") { inputText().any { it in 'a'..'z' || it in 'A'..'Z' } }
         assertNotEquals("こんにちは",inputText())

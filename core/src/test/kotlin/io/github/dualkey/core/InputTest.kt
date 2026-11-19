@@ -6,7 +6,7 @@ import org.junit.Test
 class InputTest {
     @Test fun standardRomaji() {
         mapOf("KYO" to "きょ", "KYOU" to "きょう", "KYOUHA" to "きょうは", "NIHONGO" to "にほんご", "SHA" to "しゃ",
-            "CHA" to "ちゃ", "TTA" to "った", "NNA" to "んな", "gakkou" to "がっこう", "kan'i" to "かんい",
+            "CHA" to "ちゃ", "TTA" to "った", "NNNA" to "んな", "gakkou" to "がっこう", "kan'i" to "かんい",
             "shinjuku" to "しんじゅく", "xtsu" to "っ", "ltsu" to "っ", "kya" to "きゃ", "fa" to "ふぁ", "va" to "ゔぁ").forEach { (r,k) -> assertEquals(r,k,Romaji.convert(r,true)) }
     }
     @Test fun incompleteAndN() {
@@ -36,12 +36,15 @@ class InputTest {
         assertRomajiSteps("kyou", listOf("k", "ky", "きょ", "きょう"))
     }
 
-    @Test fun doubleNReusesItsSecondKeyOnlyForAnNRowSyllable() {
+    @Test fun doubleNConsumesBothKeysBeforeTheNextSyllable() {
         assertRomajiSteps("nnka", listOf("n", "ん", "んk", "んか"))
-        assertRomajiSteps("nna", listOf("n", "ん", "んな"))
-        assertRomajiSteps("nni", listOf("n", "ん", "んに"))
+        assertRomajiSteps("nna", listOf("n", "ん", "んあ"))
+        assertRomajiSteps("nni", listOf("n", "ん", "んい"))
+        assertRomajiSteps("nnu", listOf("n", "ん", "んう"))
+        assertRomajiSteps("nne", listOf("n", "ん", "んえ"))
+        assertRomajiSteps("nno", listOf("n", "ん", "んお"))
         assertRomajiSteps("nnwa", listOf("n", "ん", "んw", "んわ"))
-        assertRomajiSteps("nnya", listOf("n", "ん", "んny", "んにゃ"))
+        assertRomajiSteps("nnya", listOf("n", "ん", "んy", "んや"))
         assertRomajiSteps("nn?", listOf("n", "ん", "ん？"))
         assertRomajiSteps("na", listOf("n", "な"))
         assertRomajiSteps("ni", listOf("n", "に"))
@@ -51,7 +54,7 @@ class InputTest {
         assertTrue(composer.delete())
         assertEquals("ん", composer.text)
         composer.append("a")
-        assertEquals("んな", composer.reading)
+        assertEquals("んあ", composer.reading)
         composer.clear()
         composer.append("ww")
         assertTrue(composer.delete())
@@ -72,7 +75,7 @@ class InputTest {
             assertEquals(keys, reading, composer.reading)
             assertEquals(keys, alternate, composer.alternateReading)
         }
-        composer.replace("konnichiha")
+        composer.replace("konnnichiha")
         assertEquals("こんにちは", composer.reading)
         assertNull(composer.alternateReading)
         composer.replace("genninn")
@@ -80,6 +83,30 @@ class InputTest {
         assertEquals("げんい", composer.reading)
         composer.append("nn")
         assertEquals("げんいん", composer.reading)
+    }
+
+    @Test fun confirmedDoubleNReadingIsStableAfterEachKeyIncludingDigits() {
+        val composer=Composer()
+        val displays=listOf("g","げ","げn","げん","げんい","げんいn","げんいん")
+        val readings=listOf("g","げ","げん","げん","げんい","げんいん","げんいん")
+        "genninn".forEachIndexed { index,key ->
+            composer.append(key.toString())
+            assertEquals("visible after ${index+1} keys",displays[index],composer.text)
+            assertEquals("reading after ${index+1} keys",readings[index],composer.reading)
+        }
+        composer.replace("genn")
+        composer.append("2")
+        assertEquals("げん2",composer.text)
+        assertEquals("げん2",composer.reading)
+        composer.replace("nn")
+        composer.append("na")
+        assertEquals("んな",composer.text)
+        composer.replace("nn")
+        composer.append("ni")
+        assertEquals("んに",composer.text)
+        composer.replace("nn")
+        composer.append("nya")
+        assertEquals("んにゃ",composer.text)
     }
 
     private fun assertRomajiSteps(keys: String, displays: List<String>) {

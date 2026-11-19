@@ -23,7 +23,6 @@ object Romaji {
     }
     private val prefixes = table.keys.flatMap { k -> (1 until k.length).map { k.take(it) } }.toSet()
     private const val sokuonInitials = "bcdfghjkmprstvyz"
-    private val vowelBetweenDoubleN = Regex("nn[aiueo]nn", RegexOption.IGNORE_CASE)
 
     private fun syllableAt(text: String, start: Int): String? {
         for (length in minOf(4, text.length - start) downTo 1) {
@@ -34,16 +33,16 @@ object Romaji {
     }
 
     fun convert(raw: String, flush: Boolean = false, preserveAsciiBangAndQuestion: Boolean = false): String =
-        convert(raw, flush, preserveAsciiBangAndQuestion, standaloneVowel = true)
+        convert(raw, flush, preserveAsciiBangAndQuestion, consumeDoubleN = true)
 
     internal fun alternateReading(raw: String, preserveAsciiBangAndQuestion: Boolean): String? {
-        if (!vowelBetweenDoubleN.containsMatchIn(raw)) return null
-        val alternate = convert(raw, true, preserveAsciiBangAndQuestion, standaloneVowel = false)
+        if (!raw.contains("nn", ignoreCase = true)) return null
+        val alternate = convert(raw, true, preserveAsciiBangAndQuestion, consumeDoubleN = false)
         return alternate.takeUnless { it == convert(raw, true, preserveAsciiBangAndQuestion) }
     }
 
     private fun convert(raw: String, flush: Boolean, preserveAsciiBangAndQuestion: Boolean,
-        standaloneVowel: Boolean): String = buildString {
+        consumeDoubleN: Boolean): String = buildString {
         val s = raw.lowercase()
         var i = 0
         while (i < s.length) {
@@ -61,13 +60,14 @@ object Romaji {
             if (c == 'n') {
                 if (next == 'n') {
                     append('ん')
-                    // The second n is available for na/nya, but has already
-                    // contributed to the displayed ん before a different consonant.
+                    // Both keys belong to the displayed ん. Later keys cannot
+                    // reinterpret the second n as the start of another syllable.
                     val afterPair = s.getOrNull(i + 2)
                     i += when {
                         afterPair == '\'' -> 3
-                        // Two explicit pairs can delimit a vowel, as in ge-nn-i-nn.
-                        standaloneVowel && afterPair != null && afterPair in "aiueo" && s.startsWith("nn", i + 3) -> 2
+                        consumeDoubleN -> 2
+                        // The older overlapping reading remains an explicit
+                        // conversion alternative, separate from the visible input.
                         afterPair != null && (syllableAt(s, i + 1) != null || s.substring(i + 1) in prefixes) -> 1
                         else -> 2
                     }

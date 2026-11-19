@@ -18,7 +18,7 @@ class SentencePunctuationTest {
     }
 
     @Test fun usesTheVisibleCompositionAndDoesNotReadPrivateFieldsOrExplicitKeys() {
-        val romaji = Composer(preserveAsciiBangAndQuestion = true).apply { append("konnichiha") }
+        val romaji = Composer(preserveAsciiBangAndQuestion = true).apply { append("konnnichiha") }
         assertEquals("こんにちは", romaji.text)
         romaji.append(SentencePunctuation.resolve("!", romaji.reading, true, false) { error("read unnecessary") })
         assertEquals("こんにちは！", romaji.reading)
