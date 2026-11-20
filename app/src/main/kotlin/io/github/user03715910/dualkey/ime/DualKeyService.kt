@@ -745,7 +745,7 @@ class DualKeyService : InputMethodService() {
                     if (SymbolCandidates.contains(symbolEntries,reading,word.text) ||
                         SymbolCandidates.contains(expressions.symbols,reading,word.text))
                         return listOf(word)
-                    val parts=engine?.learningUnits(word.reading,word.text).orEmpty()
+                    val parts=engine?.learningUnits(word.reading,word.text,semantic).orEmpty()
                     if (parts.isNotEmpty()) return parts
                     return if (word.text in expressions.words[reading].orEmpty() ||
                         word.evidence?.reason in setOf(CandidateReason.EXPRESSION_EXACT, CandidateReason.EXPRESSION_MEANING) ||

@@ -9,16 +9,72 @@ import java.util.zip.GZIPInputStream
 class JapaneseDictionaryTest {
     companion object {
         private lateinit var lexicon: JapaneseLexicon
+        private lateinit var semantic: JapaneseLexicon
         @JvmStatic @BeforeClass fun load() {
             val asset = File("../app/src/main/assets/japanese/lexicon.dklz")
             val temp = File.createTempFile("dualkey-lexicon", ".dkl").apply { deleteOnExit() }
             GZIPInputStream(asset.inputStream(),65536).use { source -> temp.outputStream().use { source.copyTo(it) } }
             lexicon = JapaneseLexicon.open(temp)
+            val meanings=File.createTempFile("dualkey-meanings", ".dkl").apply { deleteOnExit() }
+            GZIPInputStream(File("../app/src/main/assets/semantic/lexicon.dklz").inputStream(),65536).use { source ->
+                meanings.outputStream().use { source.copyTo(it) }
+            }
+            semantic=JapaneseLexicon.open(meanings)
         }
     }
     private val engine get() = DictionaryConversionEngine(lexicon)
     private fun words(reading: String, predict: Boolean = false, limit: Int = 30) =
         engine.candidates(reading, predict, limit).map { it.text }
+
+    @Test fun dictionaryAttestedLoanwordsCanParticipateInsideWholeSentences() {
+        val examples=mapOf(
+            "がちゃはひかないでしょ？" to "ガチャは引かないでしょ？",
+            "こんかいのがちゃはひかないでしょ？" to "今回のガチャは引かないでしょ？",
+            "がちゃをひいたけど、ほしいきゃらくたーがでなかった" to "ガチャを引いたけど、欲しいキャラクターが出なかった",
+            "がちゃを3かいひいてから、けっかをおしえてください" to "ガチャを3回引いてから、結果を教えてください",
+            "がちゃはひかないでしょ？🙂" to "ガチャは引かないでしょ？🙂",
+        )
+        for ((reading,expected) in examples) {
+            for (prediction in listOf(false,true)) {
+                val values=JapaneseCandidates.generate(reading,prediction,64,engine,semantic=semantic)
+                assertEquals(reading,expected,values.all.first().text)
+                assertEquals(reading,expected,values.exact.first().text)
+                assertTrue(values.all.first().text.contains("ガチャ"))
+                assertTrue(values.all.any { it.text==reading })
+                assertEquals(values.all.size,values.all.map { it.text }.distinct().size)
+            }
+        }
+        val literal=JapaneseCandidates.generate("がちゃ",false,64,engine,semantic=semantic).exact.first { it.text=="ガチャ" }
+        assertEquals(CandidateSource.JMDICT,literal.evidence?.source)
+        assertTrue(engine.knownChoice("がちゃ","ガチャ",semantic))
+        assertFalse(engine.knownChoice("がちゃ","カプセルトイ",semantic))
+        val units=engine.learningUnits("がちゃをひきます","ガチャを引きます",semantic)
+        assertEquals("ガチャを引きます",units.joinToString("") { it.text })
+        assertEquals("がちゃをひきます",units.joinToString("") { it.reading })
+        assertTrue(units.any { it.text=="ガチャ" && it.reading=="がちゃ" })
+    }
+
+    @Test fun negativeVerbSpellingsUseTheDictionaryFormAsWellAsTheInflectedCost() {
+        for ((reading,expected) in mapOf(
+            "ひかないでください" to "引かないでください",
+            "ほんはよまないでください" to "本は読まないでください",
+            "めーるをかかないつもりです" to "メールを書かないつもりです",
+            "このぼたんはおさないでください" to "このボタンは押さないでください",
+        )) assertEquals(reading,expected,words(reading).first())
+    }
+
+    @Test fun literalDigitsDoNotTurnOtherwiseRecognizedSentencesIntoUnknownReadings() {
+        for ((reading,expected) in mapOf(
+            "あしたのかいぎは10じからはじまります" to "明日の会議は10時から始まります",
+            "らいしゅうのかいぎは15じからです" to "来週の会議は15時からです",
+            "このどうがを2かいみてから、しりょうをよんでください" to "この動画を2回見てから、資料を読んでください",
+        )) {
+            val values=JapaneseCandidates.generate(reading,false,64,engine)
+            assertEquals(reading,expected,values.all.first().text)
+            assertEquals(reading,expected,values.exact.first().text)
+            assertTrue(values.all.any { it.text==reading })
+        }
+    }
 
     @Test fun reconversionRecoversReadingsAndKeepsUnchangedSpansAndSeparators() {
         val converter=engine

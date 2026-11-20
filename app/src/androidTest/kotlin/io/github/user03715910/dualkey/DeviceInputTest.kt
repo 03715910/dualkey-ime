@@ -1498,6 +1498,43 @@ class DeviceInputTest {
         key(KeyEvent.KEYCODE_SPACE); await("今日は") { inputText()=="今日は" }
         key(KeyEvent.KEYCODE_ENTER); assertEquals("今日は",inputText())
     }
+    @Test fun physicalConversationConvertsTheWholeLoanwordAndTheFollowingClause() {
+        letters("GACHAWOHIITAKEDO")
+        key(KeyEvent.KEYCODE_COMMA)
+        letters("HOSHIIKYARAKUTA")
+        key(KeyEvent.KEYCODE_MINUS)
+        letters("GADENAKATTA")
+        assertEquals("がちゃをひいたけど、ほしいきゃらくたーがでなかった",inputText())
+        key(KeyEvent.KEYCODE_SPACE)
+        await("whole conversational sentence converted") {
+            inputText()=="ガチャを引いたけど、欲しいキャラクターが出なかった"
+        }
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("ガチャを引いたけど、欲しいキャラクターが出なかった",inputText())
+        main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
+        assertNull(hardwareNode("物理キーボードの候補一覧"))
+    }
+    @Test fun screenConversationKeepsTheCommittedPrefixAndConvertsTheRestNaturally() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.japaneseLayout,"QWERTY"); app.settings.state.first { it.japaneseQwerty } }
+        resetPunctuationEditor("今回の")
+        "gachahahikanaidesho".forEach { touch(rect(it.toString())) }
+        assertEquals("今回のがちゃはひかないでしょ",inputText())
+        touch(rect("空白/変換"))
+        await("screen sentence selects a natural first candidate") { inputText()=="今回のガチャは引かないでしょ" }
+        touch(rect("↵"))
+        assertEquals("今回のガチャは引かないでしょ",inputText())
+    }
+    @Test fun physicalNumericSentenceConvertsBeforeLiteralScriptAlternatives() {
+        letters("ASHITANOKAIGIHA")
+        key(KeyEvent.KEYCODE_1)
+        key(KeyEvent.KEYCODE_0)
+        letters("JIKARAHAJIMARIMASU")
+        key(KeyEvent.KEYCODE_SPACE)
+        assertEquals("明日の会議は10時から始まります",inputText())
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("明日の会議は10時から始まります",inputText())
+    }
     @Test fun learnedChoiceMovesToTopAndIsIgnoredInPrivateEditors() {
         val app=instrumentation.targetContext.applicationContext as DualKeyApp
         runBlocking {

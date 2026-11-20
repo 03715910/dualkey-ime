@@ -8,10 +8,14 @@ import java.nio.channels.FileChannel
 import java.util.PriorityQueue
 
 data class LexiconWord(val text: String, val left: Int, val right: Int, val cost: Int)
-data class LexiconMatch(val end: Int, val word: LexiconWord, val unknown: Boolean = false)
+data class LexiconMatch(val end: Int, val word: LexiconWord, val unknown: Boolean = false,
+    val source: CandidateSource = CandidateSource.JAPANESE_LEXICON)
 
 /** Read-only DKL1 index. Absolute buffer reads make the mapped lexicon shareable. */
 class JapaneseLexicon private constructor(private val data: ByteBuffer) {
+    internal val loanwordCache = object : LinkedHashMap<String, List<LexiconMatch>>(128, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, List<LexiconMatch>>?) = size > 128
+    }
     val readingCount = data.getInt(8)
     val entryCount = data.getInt(12)
     private val dimension = data.getInt(16)

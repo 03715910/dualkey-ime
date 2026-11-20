@@ -4,6 +4,26 @@ package io.github.dualkey.core
 object SemanticConversion {
     fun katakana(reading: String) = reading.map { if (it in 'ぁ'..'ゖ') it+0x60 else it }.joinToString("")
 
+    /** Only attested spellings with the same reading can enter Japanese sentence paths. */
+    internal fun loanwordMatches(input: String, start: Int, lexicon: JapaneseLexicon?): List<LexiconMatch> {
+        if (lexicon == null || input.length - start < 3) return emptyList()
+        // The bundled semantic builder restricts loanword readings to 18 characters.
+        // Keep a bounded, in-memory cache of the short dictionary lookups.
+        val prefix = input.substring(start, minOf(input.length, start + 18))
+        val relative = synchronized(lexicon.loanwordCache) {
+            lexicon.loanwordCache.getOrPut(prefix) {
+                lexicon.prefixes(prefix, 0).mapNotNull { match ->
+                    val reading = prefix.substring(0, match.end)
+                    val word = match.word
+                    if (reading.length < 3 || word.cost !in 5000..6000 ||
+                        word.text != katakana(reading)) null
+                    else match.copy(word = word.copy(left = 1851, right = 1851), source = CandidateSource.JMDICT)
+                }
+            }
+        }
+        return if (start == 0) relative else relative.map { it.copy(end = start + it.end) }
+    }
+
     // Current names and common readings that may be missing from the bundled JMdict snapshot.
     private val spellingAliases = mapOf(
         "Windows" to "うぃんどうず ういんどうず うぃんどーず ういんどーず",

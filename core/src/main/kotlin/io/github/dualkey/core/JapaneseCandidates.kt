@@ -20,7 +20,7 @@ object JapaneseCandidates {
         val count = limit.coerceIn(2, 10000)
         val choices = history.asSequence().filter { it.reading.isNotEmpty() && key.contains(it.reading) }
             .groupBy { it.reading }.mapValues { (_, values) -> values.associateBy { it.text } }
-        val converted = if (engine is DictionaryConversionEngine) engine.search(key, prediction, count, choices, now)
+        val converted = if (engine is DictionaryConversionEngine) engine.search(key, prediction, count, choices, now, semantic)
             else engine.candidates(key, prediction, count)
         val byReason = converted.groupBy { it.evidence?.reason }
         fun group(reason: CandidateReason) = byReason[reason].orEmpty()
@@ -124,7 +124,7 @@ object JapaneseCandidates {
         val leading = head.take(2)
         val learnedPrefixes = if (prediction && key.length >= 2 && history.isNotEmpty()) {
             learnedPrefixes(key, history, leading.map { it.text }.toSet(), contextualPrefixes,
-                engine, symbols, expressions, now)
+                engine, semantic, symbols, expressions, now)
         } else emptyList()
 
         // Show a sample from secondary sources early, then continue through the full
@@ -181,7 +181,7 @@ object JapaneseCandidates {
     }
 
     private fun learnedPrefixes(key: String, history: List<LearnedChoice>, reserved: Set<String>,
-        contextual: List<Candidate>, engine: ConversionEngine, symbols: Map<String, List<String>>,
+        contextual: List<Candidate>, engine: ConversionEngine, semantic: JapaneseLexicon?, symbols: Map<String, List<String>>,
         expressions: ExpressionCandidates, now: Long,
     ): List<Candidate> {
         val inContext = contextual.map { it.reading to it.text }.toSet()
@@ -201,7 +201,7 @@ object JapaneseCandidates {
                 val isSymbol = SymbolCandidates.contains(expressions.symbols, reading, text) ||
                     SymbolCandidates.contains(symbols, reading, text)
                 val known = isSymbol || text in expressions.words[reading].orEmpty() ||
-                    (engine as? DictionaryConversionEngine)?.knownChoice(reading, text) == true ||
+                    (engine as? DictionaryConversionEngine)?.knownChoice(reading, text, semantic) == true ||
                     PhrasePrediction.candidates(reading, false).any { it.text == text }
                 if (!known) return@mapNotNull null
                 Candidate(text, reading, if (isSymbol) CandidateKind.SYMBOL else CandidateKind.WORD,
@@ -214,7 +214,7 @@ object JapaneseCandidates {
         val known = history.filter { pair ->
             pair.count >= 2 && context.text.endsWith(pair.context) && pair.context.length <= 32 &&
                 pair.text.length <= 32 && pair.reading.length <= 32 &&
-                ((engine as? DictionaryConversionEngine)?.knownChoice(pair.reading, pair.text) == true ||
+                ((engine as? DictionaryConversionEngine)?.knownChoice(pair.reading, pair.text, semantic) == true ||
                     PhrasePrediction.candidates(pair.reading, false).any { it.text == pair.text } ||
                     pair.text in SemanticConversion.equivalents(semantic, pair.reading))
         }
