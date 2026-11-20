@@ -1,17 +1,17 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 40,
-  "versionName": "0.1.37",
-  "releaseDate": "2026-11-19",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.37/DualKeyIME-0.1.37.apk",
+  "versionCode": 41,
+  "versionName": "0.1.38",
+  "releaseDate": "2026-11-20",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.38/DualKeyIME-0.1.38.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "9d7d1007ba697cecb6a0508873a50b13fc458f7aed1a200f285634ca6eb950a1",
+  "sha256": "6ee2ef635bdf7d0cd28f41fa9f2b40b38ca6513514c973a4131635ed825e6269",
   "sizeBytes": 101804123,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "nn で「ん」を入力した後の母音が、すぐ独立した「あ・い・う・え・お」になるよう修正しました。",
-    "genninn の途中で「げんに」が表示されず、i を押した時点で「げんい」と表示されます。",
-    "物理キーボードと画面QWERTYの両方に適用されます。"
+    "「ガチャ」など、補助辞書にある同じ読みのカタカナ語を文中でも変換できるよう改善しました。",
+    "動詞の活用形と基本形の辞書評価を組み合わせ、不自然な漢字が上位に出ることを抑えます。",
+    "数字を含む文でも、自然な漢字変換をひらがな・カタカナ表記より優先します。"
   ]
 }
