@@ -1767,6 +1767,38 @@ class DeviceInputTest {
         main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
         clickLabel("表記を切り替え"); assertEquals("イス",inputText())
     }
+    @Test fun scriptButtonWorksWhenTheSearchEditorDisablesPredictions() {
+        resetPunctuationEditor(type=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
+            options=EditorInfo.IME_ACTION_SEARCH)
+        letters("ISU")
+        assertEquals("いす",inputText())
+        assertTrue("This editor suppresses predictions",diagnostic().contains("predictions=false"))
+        touch(rect("カナ/英"))
+        assertEquals("イス",inputText())
+        touch(rect("カナ/英"))
+        await("search editor can convert the word to its English meaning") { inputText()=="chair" }
+        main { assertTrue(android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)>=0) }
+        touch(rect("カナ/英"))
+        assertEquals("いす",inputText())
+        key(KeyEvent.KEYCODE_ENTER)
+        assertEquals("いす",inputText())
+    }
+    @Test fun qwertyScriptButtonWorksWhenSuggestionsAreDisabledAndKeepsThePrefix() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        runBlocking { app.settings.set(Prefs.japaneseLayout,"QWERTY"); app.settings.state.first { it.japaneseQwerty } }
+        resetPunctuationEditor("前の文。",type=InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_NO_SUGGESTIONS,
+            options=EditorInfo.IME_ACTION_SEARCH)
+        "isu".forEach { touch(rect(it.toString())) }
+        assertEquals("前の文。いす",inputText())
+        touch(rect("カナ/英"))
+        assertEquals("前の文。イス",inputText())
+        touch(rect("カナ/英"))
+        await("QWERTY script button translates only the composing text") { inputText()=="前の文。chair" }
+        touch(rect("カナ/英"))
+        assertEquals("前の文。いす",inputText())
+        touch(rect("↵"))
+        assertEquals("前の文。いす",inputText())
+    }
     @Test fun scriptCycleFromKanjiDoesNotReplaceCommittedHistory() {
         letters("NIHONGO"); key(KeyEvent.KEYCODE_SPACE); key(KeyEvent.KEYCODE_ENTER)
         assertEquals("日本語",inputText())

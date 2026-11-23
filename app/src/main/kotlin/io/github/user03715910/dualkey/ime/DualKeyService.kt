@@ -1770,7 +1770,14 @@ class DualKeyService : InputMethodService() {
         }
     }
     private fun cycleScript() {
-        if (sensitive || numeric || !predictionsAllowed || english || composer.isEmpty) return
+        if (sensitive || numeric || !japaneseConversionAllowed || english) {
+            Toast.makeText(this,"日本語の文字入力欄で表記を切り替えられます。",Toast.LENGTH_SHORT).show()
+            return
+        }
+        if (composer.isEmpty) {
+            Toast.makeText(this,"入力中の文字を切り替えます。文字を入力し、確定前に押してください。",Toast.LENGTH_LONG).show()
+            return
+        }
         invalidateTranslation()
         val reading=composer.reading
         if (reading.length>5000) { Toast.makeText(this,"表記切り替えは5,000文字までです。",Toast.LENGTH_SHORT).show(); return }
