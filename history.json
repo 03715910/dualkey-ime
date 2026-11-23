@@ -1,6 +1,22 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 42,
+    "versionName": "0.1.39",
+    "releaseDate": "2026-11-23",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.39/DualKeyIME-0.1.39.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "8cb0b2440880ed968d78f6cb253bd8550392abecb2460637ea09c5beed8ad910",
+    "sizeBytes": 101804123,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "検索欄など予測候補を出さない入力欄でも「カナ/英」ボタンで表記を切り替えられるよう修正しました。",
+      "未確定文字がないときには、ボタンの使い方を表示します。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 41,
     "versionName": "0.1.38",
     "releaseDate": "2026-11-20",
