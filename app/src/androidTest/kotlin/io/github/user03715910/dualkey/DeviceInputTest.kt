@@ -986,6 +986,30 @@ class DeviceInputTest {
         oldAction.send(); SystemClock.sleep(250)
         assertTrue(imeHeight()>300); assertEquals("にほんご",inputText())
     }
+    @Test fun editingInTheSameHiddenFieldRestoresTheShowNotificationWithoutAShowRequest() {
+        val app=instrumentation.targetContext.applicationContext as DualKeyApp
+        org.junit.Assume.assumeTrue("Use an emulator with a hardware keyboard",app.hardwareKeyboardConnected.value)
+        resetPunctuationEditor("前後")
+        enableControlNotification()
+        ImeControl.request(DisplayMode.HIDDEN)
+        fun hasShowAction()=controlNotification()?.actions?.firstOrNull()?.title?.toString()=="キーボードを表示"
+        await("hidden keyboard with the show action") { imeHeight()==0 && ImeControl.state.value.editorActive && hasShowAction() }
+        val manager=app.getSystemService(NotificationManager::class.java)
+        manager.cancel(KeyboardVisibilityNotification.ID)
+        await("notification dismissed") { controlNotification()==null }
+        // Change the caret without calling showSoftInput or restarting this editor.
+        main { editor.setSelection(1) }
+        await("notification restored when the caret moves") { hasShowAction() }
+        assertEquals("前後",inputText())
+        assertEquals(0,imeHeight())
+        SystemClock.sleep(1100)
+        manager.cancel(KeyboardVisibilityNotification.ID)
+        await("notification dismissed again") { controlNotification()==null }
+        letters("KA")
+        await("notification restored during physical typing") { hasShowAction() }
+        assertEquals("前か後",inputText())
+        assertEquals(0,imeHeight())
+    }
     @Test fun disablingNotificationCancelsItsDeferredDisplayChoice() {
         enableControlNotification()
         ImeControl.request(DisplayMode.HIDDEN); await("manual hidden mode") { imeHeight()==0 && ImeControl.state.value.mode==DisplayMode.HIDDEN }

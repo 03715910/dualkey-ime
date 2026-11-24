@@ -30,6 +30,9 @@ import io.github.user03715910.dualkey.ime.KeyboardVisibilityNotification
 import io.github.user03715910.dualkey.update.*
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.map
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
@@ -52,6 +55,8 @@ class MainActivity : AppCompatActivity() {
     private var homeUpdateStatus: TextView?=null
     private var homeUpdateAction: Button?=null
     private var keyboardStatus: TextView?=null
+    private var homeNotificationHelp: Button?=null
+    private var visibilityNotificationStatus: TextView?=null
     private var installWhenReady=false
     private var awaitingPermissionResult=false
     private var installInFlight=false
@@ -127,6 +132,11 @@ class MainActivity : AppCompatActivity() {
             selectPage(page)
             launch { app.updates.state.collect { renderUpdate(it) } }
             launch { app.learning.message.collect { message -> pageContent.findViewWithTag<TextView>("learning_status")?.text=message } }
+            launch {
+                combine(app.settings.state.map { it.visibilityNotification }.distinctUntilChanged(),
+                    app.hardwareKeyboardConnected) { enabled,connected -> enabled to connected }
+                    .collect { refreshVisibilityNotificationStatus() }
+            }
             if (!app.updates.state.value.busy) app.updates.restoreCached()
             resumeInstallationFlow()
             if (savedInstanceState==null && intent.getBooleanExtra("restore_keyboard",false)) restoreKeyboard()
@@ -150,7 +160,12 @@ class MainActivity : AppCompatActivity() {
     override fun onResume() {
         super.onResume()
         KeyboardVisibilityNotification.refresh(this)
-        if (uiReady) { refreshKeyboardStatus(); resumeInstallationFlow(); maybeShowUpdatePrompt() }
+        if (uiReady) {
+            refreshKeyboardStatus()
+            refreshVisibilityNotificationStatus()
+            resumeInstallationFlow()
+            maybeShowUpdatePrompt()
+        }
     }
     override fun onPostResume() { super.onPostResume(); if (uiReady) resumeInstallationFlow() }
     override fun onWindowFocusChanged(hasFocus: Boolean) {
@@ -210,6 +225,7 @@ class MainActivity : AppCompatActivity() {
         page=target; pageContent.removeAllViews(); content=pageContent
         testInput=null; updateStatus=null; updateDetails=null; updatePrimary=null; updateCheck=null; updateProgress=null
         homeUpdateStatus=null; homeUpdateAction=null; keyboardStatus=null
+        homeNotificationHelp=null; visibilityNotificationStatus=null
         if (target !in listOf(Page.HOME,Page.SETTINGS,Page.UPDATES,Page.GUIDE)) button("‹ 設定に戻る") { selectPage(Page.SETTINGS) }
         when (target) {
             Page.HOME -> home()
@@ -223,7 +239,7 @@ class MainActivity : AppCompatActivity() {
             Page.GUIDE -> guide()
         }
         scroll.post { scroll.scrollTo(0,0) }
-        renderUpdate(app.updates.state.value); refreshKeyboardStatus()
+        renderUpdate(app.updates.state.value); refreshKeyboardStatus(); refreshVisibilityNotificationStatus()
     }
     private fun home() {
         heading("あなたのキーボード","フリックと物理キーボードを、ひとつに。")
@@ -240,6 +256,7 @@ class MainActivity : AppCompatActivity() {
             button("1. キーボードを有効にする") { openIntent(Intent(AndroidSettings.ACTION_INPUT_METHOD_SETTINGS)) }
             button("2. 使用するキーボードを選択",true) { getSystemService(InputMethodManager::class.java).showInputMethodPicker() }
             text("初回だけAndroidの設定が開きます。")
+            homeNotificationHelp=button("表示切替の通知を設定") { selectPage(Page.HARDWARE) }
         }
         section("入力を試す","ここでサイズや打ち心地を確認できます。") {
             testInput=EditText(this).apply {
@@ -393,8 +410,8 @@ class MainActivity : AppCompatActivity() {
                 else lifecycleScope.launch { app.settings.clearNotificationDisplay() }
             }
             text("物理キーボード接続中に画面キーボードを隠すと、通知に「キーボードを表示」が出ます。入力欄がないときは、次にタップする入力欄で表示します。")
-            button("通知の許可・設定") { KeyboardVisibilityNotification.ensureChannel(this); requestNotificationPermission(true) }
-            if (!KeyboardVisibilityNotification.permitted(this)) text("表示切替の通知を使うには、Androidの通知を許可してください。")
+            visibilityNotificationStatus=text("").apply { tag="visibility_notification_status" }
+            button("通知の許可・設定") { openVisibilityNotificationSettings() }
             text("この通知はアプリ更新の通知とは別にON／OFFできます。入力した文章は通知へ表示しません。")
         }
         section("ショートカット") {
@@ -681,9 +698,35 @@ class MainActivity : AppCompatActivity() {
         super.onRequestPermissionsResult(requestCode,permissions,grantResults)
         if (requestCode==301) {
             KeyboardVisibilityNotification.refresh(this)
-            if (uiReady && page==Page.HARDWARE) selectPage(Page.HARDWARE)
+            if (uiReady) refreshVisibilityNotificationStatus()
         }
     }
+    private fun refreshVisibilityNotificationStatus() {
+        if (homeNotificationHelp==null && visibilityNotificationStatus==null) return
+        val enabled=app.settings.state.value.visibilityNotification
+        val selected=KeyboardVisibilityNotification.selected(this)
+        val permitted=KeyboardVisibilityNotification.permitted(this)
+        homeNotificationHelp?.visibility=if (selected && app.hardwareKeyboardConnected.value && (!enabled || !permitted)) View.VISIBLE else View.GONE
+        visibilityNotificationStatus?.text=when {
+            !enabled -> "表示切替の通知はオフです。"
+            !selected -> "使用するキーボードにDualKey IMEを選ぶと、表示切替の通知を使えます。"
+            !KeyboardVisibilityNotification.appNotificationsAllowed(this) -> "AndroidでDualKey IMEの通知が許可されていません。下のボタンから許可してください。"
+            !permitted -> "Androidで「キーボードの表示切り替え」がオフです。下のボタンからオンにできます。"
+            else -> "表示切替の通知を使えます。通知欄の「サイレント」に表示される場合があります。"
+        }
+    }
+
+    private fun openVisibilityNotificationSettings() {
+        KeyboardVisibilityNotification.ensureChannel(this)
+        if (!KeyboardVisibilityNotification.appNotificationsAllowed(this)) {
+            requestNotificationPermission(openSettingsIfGranted=true)
+            return
+        }
+        openIntent(Intent(AndroidSettings.ACTION_CHANNEL_NOTIFICATION_SETTINGS)
+            .putExtra(AndroidSettings.EXTRA_APP_PACKAGE,packageName)
+            .putExtra(AndroidSettings.EXTRA_CHANNEL_ID,KeyboardVisibilityNotification.CHANNEL))
+    }
+
     private fun requestNotificationPermission(openSettingsIfGranted: Boolean=false) {
         if (Build.VERSION.SDK_INT>=33 && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) {
             if (getPreferences(MODE_PRIVATE).getBoolean("notification_requested",false) && !shouldShowRequestPermissionRationale(Manifest.permission.POST_NOTIFICATIONS)) {

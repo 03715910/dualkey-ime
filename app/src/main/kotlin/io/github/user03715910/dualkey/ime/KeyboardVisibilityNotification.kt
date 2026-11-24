@@ -27,27 +27,35 @@ object KeyboardVisibilityNotification {
                 description="通知から画面キーボードを表示・非表示にします"; setShowBadge(false)
             })
     }
-    fun permitted(context: Context): Boolean {
+    fun appNotificationsAllowed(context: Context): Boolean {
         if (Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) return false
-        val manager=context.getSystemService(NotificationManager::class.java)
-        return NotificationManagerCompat.from(context).areNotificationsEnabled() && manager.getNotificationChannel(CHANNEL)?.importance!=NotificationManager.IMPORTANCE_NONE
+        return NotificationManagerCompat.from(context).areNotificationsEnabled()
     }
+    fun permitted(context: Context): Boolean =
+        appNotificationsAllowed(context) && context.getSystemService(NotificationManager::class.java)
+            .getNotificationChannel(CHANNEL)?.importance!=NotificationManager.IMPORTANCE_NONE
+
     fun restoreShowActionIfMissing(context: Context) {
         val app=context.applicationContext as DualKeyApp
         if (!app.hardwareKeyboardConnected.value || ImeControl.state.value.keyboardVisible ||
-            !app.settings.isLoaded || !app.settings.state.value.visibilityNotification) return
+            !app.settings.isLoaded || !app.settings.state.value.visibilityNotification ||
+            !permitted(context)) return
         val manager=context.getSystemService(NotificationManager::class.java)
         if (manager.activeNotifications.none { it.id==ID && it.tag==null }) refresh(context)
     }
     fun refresh(context: Context) {
         val app=context.applicationContext as DualKeyApp
         val manager=NotificationManagerCompat.from(context)
-        if (!app.settings.isLoaded || !app.settings.state.value.visibilityNotification || !selected(context) || !permitted(context)) {
+        if (!app.settings.isLoaded || !app.settings.state.value.visibilityNotification || !selected(context)) {
+            manager.cancel(ID); return
+        }
+        // Make the notification category available in Android Settings even before permission is granted.
+        ensureChannel(context)
+        if (!permitted(context)) {
             manager.cancel(ID); return
         }
         // Keep the runtime permission check at the posting site as well as in the UI helper.
         if (Build.VERSION.SDK_INT>=33 && ContextCompat.checkSelfPermission(context,Manifest.permission.POST_NOTIFICATIONS)!=PackageManager.PERMISSION_GRANTED) return
-        ensureChannel(context)
         val state=ImeControl.state.value
         val showOnly=app.hardwareKeyboardConnected.value && !state.keyboardVisible
         val pending=app.settings.state.value.pendingNotificationDisplay

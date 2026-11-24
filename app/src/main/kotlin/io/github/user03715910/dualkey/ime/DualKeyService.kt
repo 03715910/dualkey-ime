@@ -56,6 +56,7 @@ class DualKeyService : InputMethodService() {
     private var candidateHostRetry: Job?=null
     private var unclippedImeHeight: Int?=null
     private var windowShown=false
+    private var lastShowNotificationCheck: Long?=null
     private var displayEpoch=0L
     private var displayRetry: Job?=null
     // A display preference is not a request to open a window. The OS owns that request.
@@ -301,6 +302,13 @@ class DualKeyService : InputMethodService() {
     private fun publishVisibility() {
         val active=hasEditor()
         ImeControl.state.value=ImeControl.UiState(active,active && windowShown && isInputViewShown && visibility.mode!=DisplayMode.HIDDEN,visibility.mode)
+    }
+    private fun restoreShowNotificationOnEditing() {
+        if (!visibility.connected || ImeControl.state.value.keyboardVisible || !hasEditor()) return
+        val now=SystemClock.uptimeMillis()
+        if (lastShowNotificationCheck?.let { now-it<1000L }==true) return
+        lastShowNotificationCheck=now
+        KeyboardVisibilityNotification.restoreShowActionIfMissing(this)
     }
     private fun hasEditor() = inputStarted && currentInputConnection!=null
     private fun applyDisplayRequest(request: ImeControl.DisplayRequest) {
@@ -1522,6 +1530,7 @@ class DualKeyService : InputMethodService() {
 
     override fun onKeyDown(keyCode: Int, event: KeyEvent): Boolean {
         if (!hasEditor()) return super.onKeyDown(keyCode,event)
+        if (event.repeatCount==0 && !KeyEvent.isModifierKey(keyCode)) restoreShowNotificationOnEditing()
         var handled=true
         when {
             settings.shortcut && settings.displayShortcut.matches(HardwareShortcuts.key(keyCode),HardwareShortcuts.modifiers(event)) -> {
@@ -1616,9 +1625,13 @@ class DualKeyService : InputMethodService() {
         val selectionChanged=editorSelection!=selection
         editorSelection=selection
         if (selectionChanged) cancelReconversion()
-        if (oldSelStart!=newSelStart || oldSelEnd!=newSelEnd) selectionEpoch++
-        val ownsComposition=!composer.isEmpty || englishWord.isNotEmpty()
         val moved=oldSelStart!=newSelStart || oldSelEnd!=newSelEnd
+        if (moved) {
+            selectionEpoch++
+            // Some editors move the cursor without asking Android to show the IME again.
+            restoreShowNotificationOnEditing()
+        }
+        val ownsComposition=!composer.isEmpty || englishWord.isNotEmpty()
         if (ownsComposition && compositionRestoreJob?.isActive==true && candidatesEnd<0 &&
             newSelStart==newSelEnd && newSelEnd==rotationComposition?.end) return
         // Delayed composing-end notifications are normal; cancel only when the cursor leaves
