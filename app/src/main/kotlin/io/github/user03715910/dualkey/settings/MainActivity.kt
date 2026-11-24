@@ -33,7 +33,7 @@ import kotlinx.coroutines.flow.first
 import java.io.File
 
 class MainActivity : AppCompatActivity() {
-    private enum class Page { HOME, SETTINGS, UPDATES, INPUT, HARDWARE, CONVERSION, TRANSLATION, ABOUT }
+    private enum class Page { HOME, SETTINGS, UPDATES, INPUT, HARDWARE, CONVERSION, TRANSLATION, ABOUT, GUIDE }
     private val app get()=application as DualKeyApp
     private lateinit var ui: SettingsUi
     private lateinit var pageContent: LinearLayout
@@ -41,6 +41,8 @@ class MainActivity : AppCompatActivity() {
     private lateinit var scroll: ScrollView
     private var testInput: EditText?=null
     private var page=Page.HOME
+    private var guideOrigin=Page.HOME
+    private var guideTopic: GuideTopic?=null
     private var uiReady=false
     private var updateStatus: TextView?=null
     private var updateDetails: TextView?=null
@@ -81,6 +83,8 @@ class MainActivity : AppCompatActivity() {
         awaitingPermissionResult=savedInstanceState?.getBoolean("awaitingPermissionResult") ?: false
         promptedVersion=savedInstanceState?.getLong("promptedVersion") ?: 0L
         page=runCatching { Page.valueOf(savedInstanceState?.getString("page") ?: "HOME") }.getOrDefault(Page.HOME)
+        guideOrigin=if (savedInstanceState?.getBoolean("guideFromSettings")==true) Page.SETTINGS else Page.HOME
+        guideTopic=GuideTopic.entries.firstOrNull { it.name==savedInstanceState?.getString("guideTopic") }
         WindowCompat.setDecorFitsSystemWindows(window,false)
         WindowInsetsControllerCompat(window,window.decorView).apply {
             val light=resources.configuration.uiMode and android.content.res.Configuration.UI_MODE_NIGHT_MASK!=android.content.res.Configuration.UI_MODE_NIGHT_YES
@@ -106,7 +110,8 @@ class MainActivity : AppCompatActivity() {
         }
         onBackPressedDispatcher.addCallback(this,object: OnBackPressedCallback(true) {
             override fun handleOnBackPressed() {
-                if (page!=Page.HOME) selectPage(if (page in listOf(Page.SETTINGS,Page.UPDATES)) Page.HOME else Page.SETTINGS)
+                if (page==Page.GUIDE) backFromGuide()
+                else if (page!=Page.HOME) selectPage(if (page in listOf(Page.SETTINGS,Page.UPDATES)) Page.HOME else Page.SETTINGS)
                 else { isEnabled=false; onBackPressedDispatcher.onBackPressed(); isEnabled=true }
             }
         })
@@ -154,6 +159,8 @@ class MainActivity : AppCompatActivity() {
     }
     override fun onSaveInstanceState(out: Bundle) {
         out.putString("page",page.name); out.putBoolean("installWhenReady",installWhenReady)
+        out.putBoolean("guideFromSettings",guideOrigin==Page.SETTINGS)
+        out.putString("guideTopic",guideTopic?.name)
         out.putBoolean("awaitingPermissionResult",awaitingPermissionResult); out.putLong("promptedVersion",promptedVersion)
         super.onSaveInstanceState(out)
     }
@@ -203,7 +210,7 @@ class MainActivity : AppCompatActivity() {
         page=target; pageContent.removeAllViews(); content=pageContent
         testInput=null; updateStatus=null; updateDetails=null; updatePrimary=null; updateCheck=null; updateProgress=null
         homeUpdateStatus=null; homeUpdateAction=null; keyboardStatus=null
-        if (target !in listOf(Page.HOME,Page.SETTINGS,Page.UPDATES)) button("‹ 設定に戻る") { selectPage(Page.SETTINGS) }
+        if (target !in listOf(Page.HOME,Page.SETTINGS,Page.UPDATES,Page.GUIDE)) button("‹ 設定に戻る") { selectPage(Page.SETTINGS) }
         when (target) {
             Page.HOME -> home()
             Page.SETTINGS -> settingsMenu()
@@ -213,12 +220,17 @@ class MainActivity : AppCompatActivity() {
             Page.CONVERSION -> conversionSettings()
             Page.TRANSLATION -> translationSettings()
             Page.ABOUT -> about()
+            Page.GUIDE -> guide()
         }
         scroll.post { scroll.scrollTo(0,0) }
         renderUpdate(app.updates.state.value); refreshKeyboardStatus()
     }
     private fun home() {
         heading("あなたのキーボード","フリックと物理キーボードを、ひとつに。")
+        button("画像で見る 使い方ガイド") { openGuide() }.apply {
+            tag="open_guide"
+            (layoutParams as LinearLayout.LayoutParams).bottomMargin=dp(14)
+        }
         section("アプリの更新") {
             homeUpdateStatus=text("")
             homeUpdateAction=button("更新を確認") { selectPage(Page.UPDATES); if (app.updates.state.value.release==null) requestCheck(false,true) else startUpdate() }
@@ -248,6 +260,7 @@ class MainActivity : AppCompatActivity() {
     private fun settingsMenu() {
         heading("設定","使いたい項目を選んでください。")
         listOf(
+            Triple("使い方ガイド","初期設定・入力・変換・貼り付けを画像で確認",Page.GUIDE),
             Triple("入力とサイズ","言語・数字行・キーボードの高さ",Page.INPUT),
             Triple("物理キーボード","接続時の表示・ショートカット",Page.HARDWARE),
             Triple("変換と辞書","予測候補・ユーザー辞書",Page.CONVERSION),
@@ -258,10 +271,51 @@ class MainActivity : AppCompatActivity() {
             ui.card(content,"$title  ›",detail).apply {
                 tag="settings_${target.name.lowercase()}"; isClickable=true; isFocusable=true; minimumHeight=dp(80)
                 background=android.graphics.drawable.RippleDrawable(android.content.res.ColorStateList.valueOf(0x22087F8C),ui.shape(ui.surface),null)
-                setOnClickListener { selectPage(target) }
+                setOnClickListener { if (target==Page.GUIDE) openGuide() else selectPage(target) }
             }
         }
     }
+    private fun openGuide() {
+        guideOrigin=page
+        guideTopic=null
+        selectPage(Page.GUIDE)
+    }
+
+    private fun backFromGuide() {
+        if (guideTopic==null) selectPage(guideOrigin)
+        else {
+            guideTopic=null
+            selectPage(Page.GUIDE)
+        }
+    }
+
+    private fun guide() {
+        val origin=if (guideOrigin==Page.SETTINGS) "設定" else "ホーム"
+        button(if (guideTopic==null) "‹ ${origin}に戻る" else "‹ 目次に戻る") { backFromGuide() }.apply {
+            (layoutParams as LinearLayout.LayoutParams).bottomMargin=dp(14)
+        }
+        val topic=guideTopic
+        if (topic==null) {
+            heading("使い方ガイド","初期設定から便利な操作まで、画面写真で確認できます。見たい項目を選んでください。")
+            GuideUi(this,ui).contents(content) {
+                guideTopic=it
+                selectPage(Page.GUIDE)
+            }
+            return
+        }
+        GuideUi(this,ui).article(content,topic)
+        val (label,target)=when (topic) {
+            GuideTopic.SETUP -> "ホームで設定・入力を試す" to Page.HOME
+            GuideTopic.TYPING, GuideTopic.EDITING, GuideTopic.CLIPBOARD -> "「入力とサイズ」を開く" to Page.INPUT
+            GuideTopic.CONVERSION, GuideTopic.DICTIONARY -> "「変換と辞書」を開く" to Page.CONVERSION
+            GuideTopic.TRANSLATION -> "「翻訳」の設定を開く" to Page.TRANSLATION
+            GuideTopic.HARDWARE -> "「物理キーボード」の設定を開く" to Page.HARDWARE
+            GuideTopic.UPDATES -> "「アプリ更新」を開く" to Page.UPDATES
+        }
+        button(label,true) { selectPage(target) }
+        button("目次に戻る") { backFromGuide() }
+    }
+
     private fun inputSettings() {
         val s=app.settings.state.value
         heading("入力とサイズ","お好みの大きさと操作感に。")

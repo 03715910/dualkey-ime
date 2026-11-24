@@ -8,6 +8,7 @@ import android.view.View
 import android.view.ViewGroup
 import android.view.accessibility.AccessibilityNodeInfo
 import android.widget.Button
+import android.widget.ImageView
 import android.widget.TextView
 import androidx.appcompat.widget.SwitchCompat
 import androidx.test.ext.junit.runners.AndroidJUnit4
@@ -102,6 +103,34 @@ class SettingsActivityTest {
         await("visible update action") { var visible=false; main { visible=tag("update_primary")?.getGlobalVisibleRect(bounds)==true }; visible }
         assertTrue("The update action is visible without scrolling",bounds.height()>50)
         capture("updates")
+    }
+    @Test fun illustratedGuideOpensFromHomeAndSettingsAndRestoresTheSelectedTopic() {
+        main { assertTrue(tag("open_guide")!!.performClick()) }
+        val topics=listOf("setup","typing","conversion","editing","clipboard","hardware","translation","dictionary","updates")
+        await("guide contents") { topics.all { tag("guide_$it")!=null } }
+        capture("guide-contents")
+        for (topic in topics) {
+            val entry=tag("guide_$topic")!!
+            main { assertTrue(entry.performClick()) }
+            await("illustration for $topic") {
+                views().filterIsInstance<ImageView>()
+                    .any { it.contentDescription?.isNotBlank()==true && it.drawable!=null && it.width>0 }
+            }
+            if (topic=="clipboard") capture("guide-clipboard")
+            main { activity.onBackPressedDispatcher.onBackPressed() }
+            await("back to the guide contents") { tag("guide_$topic")!=null }
+        }
+        main { activity.onBackPressedDispatcher.onBackPressed() }
+        await("back to the home input field") { tag("test_input")!=null }
+        click(R.id.nav_settings)
+        val settingsGuide=tag("settings_guide")!!
+        main { assertTrue(settingsGuide.performClick()) }
+        val clipboard=tag("guide_clipboard")!!
+        main { assertTrue(clipboard.performClick()) }
+        recreate()
+        await("restored clipboard guide") { textContains("履歴が開きます") }
+        main { activity.onBackPressedDispatcher.onBackPressed(); activity.onBackPressedDispatcher.onBackPressed() }
+        await("back to settings") { tag("settings_guide")!=null }
     }
     @Test fun startupOfferWorksWithoutNotificationPermissionAndLaterDoesNotRepeat() {
         if (android.os.Build.VERSION.SDK_INT>=33) assertNotEquals(android.content.pm.PackageManager.PERMISSION_GRANTED,
