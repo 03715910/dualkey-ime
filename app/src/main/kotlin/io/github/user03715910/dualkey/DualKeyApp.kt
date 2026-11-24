@@ -46,7 +46,9 @@ class DualKeyApp : Application(), InputManager.InputDeviceListener {
         inputManager.registerInputDeviceListener(this,Handler(Looper.getMainLooper()))
         refreshHardwareKeyboard()
         clipboardMedia // remove expired staging from an earlier process
-        scope.launch { clipboard.clearEvents.filter { it!=0L }.collect { clipboardMedia.clearPinned() } }
+        scope.launch { clipboard.clearEvents.filter { it!=0L }.collect {
+            clipboardMedia.clearPinned(); clipboardMedia.saveHistory(emptyList())
+        } }
         scope.launch { settings.awaitLoaded(); settings.state.map { it.autoCheck }.distinctUntilChanged().collect { UpdateScheduler.schedule(this@DualKeyApp, it) } }
         scope.launch {
             settings.awaitLoaded()

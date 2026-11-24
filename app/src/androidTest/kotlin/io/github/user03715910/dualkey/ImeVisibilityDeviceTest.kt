@@ -188,6 +188,65 @@ class ImeVisibilityDeviceTest {
             await("earlier PNG received from history after a newer copy") { mediaResult().contains("image/png; match=true") }
         } finally { runBlocking { app.settings.set(Prefs.clipboardHistory,false) } }
     }
+    @Test fun genericImageUriWithTextFallbackCanPreviewPasteAndEnterHistory() {
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        try {
+            launch("images"); await("image editor focused") { fixtureState().contains("windowFocus=true") }; edit()
+            click("copy-generic:test.png")
+            keyboardAction("コピーしたメディアのプレビュー")
+            await("generic URI image pasted as PNG, not its fallback text") { mediaResult().contains("image/png; match=true") }
+            assertEquals("",text())
+            click("reset-media")
+            keyboardAction("貼り付け",AccessibilityNodeInfo.ACTION_LONG_CLICK)
+            keyboardAction("画像 · PNG")
+            await("generic URI image retained in history") { mediaResult().contains("image/png; match=true") }
+        } finally { runBlocking { app.settings.set(Prefs.clipboardHistory,false) } }
+    }
+    @Test fun imageInALaterClipboardItemCanBePastedFromHistory() {
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        try {
+            launch("images"); await("image editor focused") { fixtureState().contains("windowFocus=true") }; edit()
+            click("copy-mixed:test.jpeg")
+            await("JPEG retained without pasting") { app.clipboardMedia.restoreHistory().any { it.media.mime=="image/jpeg" } }
+            keyboardAction("貼り付け",AccessibilityNodeInfo.ACTION_LONG_CLICK)
+            keyboardAction("画像 · JPEG")
+            await("later clipboard item delivered") { mediaResult().contains("image/jpeg; match=true") }
+            assertEquals("",text())
+        } finally { runBlocking { app.settings.set(Prefs.clipboardHistory,false) } }
+    }
+    @Test fun declaredImageTypeWorksWhenTheProviderOmitsItsType() {
+        launch("images"); await("image editor focused") { fixtureState().contains("windowFocus=true") }; edit()
+        click("copy-untyped:test.png")
+        keyboardAction("貼り付け")
+        await("declared PNG type delivered") { mediaResult().contains("image/png; match=true") }
+        click("reset-media"); click("copy-mismatch:test.png")
+        keyboardAction("貼り付け"); SystemClock.sleep(400)
+        assertTrue("Do not trust a type that contradicts the provider",mediaResult().contains("FixtureMedia: none"))
+        letters("ka"); await("typing still works after MIME rejection") { text()=="か" }
+    }
+    @Test fun unpinnedImageHistorySurvivesServiceRecreationButStillHonorsDeletion() {
+        runBlocking { app.settings.set(Prefs.clipboardHistory,true); app.settings.state.first { it.clipboardHistory } }
+        val ime=ComponentName(instrumentation.targetContext.packageName,"io.github.user03715910.dualkey.ime.DualKeyService").flattenToShortString()
+        try {
+            launch("images"); await("image editor focused") { fixtureState().contains("windowFocus=true") }; edit()
+            click("copy-test.png")
+            await("history persisted before restart") { app.clipboardMedia.restoreHistory().any { it.media.mime=="image/png" } }
+            val restored=io.github.user03715910.dualkey.data.ClipboardMedia(instrumentation.targetContext,app.scope).restoreHistory()
+            assertTrue("A new store restores staged data without the source URI",restored.any { it.media.mime=="image/png" })
+            shell("ime disable $ime"); shell("ime enable $ime"); shell("ime set $ime")
+            edit()
+            click("copy-test.jpeg")
+            click("expect-earlier-png")
+            keyboardAction("貼り付け",AccessibilityNodeInfo.ACTION_LONG_CLICK)
+            keyboardAction("画像 · PNG")
+            await("earlier unpinned PNG is available after service recreation") { mediaResult().contains("image/png; match=true") }
+            app.clipboard.clear()
+            await("deletion also clears the persistent media index") { app.clipboardMedia.restoreHistory().isEmpty() }
+        } finally {
+            shell("ime enable $ime"); shell("ime set $ime")
+            runBlocking { app.settings.set(Prefs.clipboardHistory,false) }
+        }
+    }
     @Test fun richEditorReceivesImagesGifAndVideoWithActualReadGrant() {
         launch("rich"); await("rich editor window focused") { fixtureState().contains("windowFocus=true") }; edit()
         listOf("test.png" to "image/png","test.jpeg" to "image/jpeg","test.webp" to "image/webp",

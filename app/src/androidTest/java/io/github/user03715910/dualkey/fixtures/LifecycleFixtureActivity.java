@@ -180,6 +180,9 @@ public class LifecycleFixtureActivity extends Activity {
     }
     private void copyMedia(String name) {
         try {
+            String style="normal";
+            int split=name.indexOf(':');
+            if (split>=0) { style=name.substring(0,split); name=name.substring(split+1); }
             if (TestMediaProvider.mime(name)==null) return;
             File file=new File(getCacheDir(),name);
             if (!name.equals("lifecycle-video.mp4")) {
@@ -197,8 +200,19 @@ public class LifecycleFixtureActivity extends Activity {
             }
             try (InputStream input=new FileInputStream(file)) { expectedMedia=readBytes(input); }
             received="none";
-            getSystemService(ClipboardManager.class).setPrimaryClip(ClipData.newUri(getContentResolver(),"test media",
-                Uri.parse("content://"+getPackageName()+".test-media/"+name)));
+            Uri uri=Uri.parse("content://"+getPackageName()+".test-media/"+name);
+            ClipData clip;
+            if (style.equals("generic")) {
+                clip=new ClipData("test media",new String[]{"text/uri-list"},new ClipData.Item("image fallback",null,uri));
+            } else if (style.equals("mixed")) {
+                clip=new ClipData("test media",new String[]{"text/plain",TestMediaProvider.mime(name)},new ClipData.Item("image fallback"));
+                clip.addItem(new ClipData.Item(uri));
+            } else if (style.equals("untyped")) {
+                clip=new ClipData("test media",new String[]{TestMediaProvider.mime(name)},new ClipData.Item(uri.buildUpon().appendQueryParameter("untyped","true").build()));
+            } else if (style.equals("mismatch")) {
+                clip=new ClipData("test media",new String[]{"image/jpeg"},new ClipData.Item(uri));
+            } else clip=ClipData.newUri(getContentResolver(),"test media",uri);
+            getSystemService(ClipboardManager.class).setPrimaryClip(clip);
         } catch (Exception e) { received="copy-error"; }
     }
     private void bars(boolean show) {
@@ -246,9 +260,9 @@ public class LifecycleFixtureActivity extends Activity {
             }
         }
         @Override public boolean onCreate() { return true; }
-        @Override public String getType(Uri uri) { return mime(uri.getLastPathSegment()); }
+        @Override public String getType(Uri uri) { return "true".equals(uri.getQueryParameter("untyped"))?null:mime(uri.getLastPathSegment()); }
         @Override public ParcelFileDescriptor openFile(Uri uri,String mode) throws FileNotFoundException {
-            if (!mode.equals("r") || getType(uri)==null) throw new FileNotFoundException();
+            if (!mode.equals("r") || mime(uri.getLastPathSegment())==null) throw new FileNotFoundException();
             return ParcelFileDescriptor.open(new File(getContext().getCacheDir(),uri.getLastPathSegment()),ParcelFileDescriptor.MODE_READ_ONLY);
         }
         @Override public android.database.Cursor query(Uri u,String[] p,String s,String[] a,String o) { return null; }

@@ -21,6 +21,7 @@ import io.github.user03715910.dualkey.settings.MainActivity
 import io.github.user03715910.dualkey.translation.TranslationEngine
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.drop
 
 class DualKeyService : InputMethodService() {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.Main.immediate)
@@ -165,15 +166,19 @@ class DualKeyService : InputMethodService() {
         scope.launch { app.clipboard.screenshotState.collect { if (clipboardShowing) clipboardHistory() } }
         scope.launch { app.clipboardMedia.pinnedEntries.collect { if (clipboardShowing) clipboardHistory() } }
         scope.launch { app.clipboard.state.collect { if (clipboardShowing) clipboardHistory() } }
-        scope.launch { app.clipboard.clearEvents.collect { clearMediaHistory(); if (clipboardShowing) clipboardHistory() } }
+        scope.launch { app.clipboard.clearEvents.drop(1).collect { clearMediaHistory(); if (clipboardShowing) clipboardHistory() } }
         scope.launch { app.japaneseDictionary.engine.collect { refreshCandidates(); scheduleReconversion() } }
         scope.launch { app.semanticDictionary.lexicon.collect { refreshCandidates() } }
         scope.launch { app.japaneseDictionary.message.collect { ui?.dictionaryStatus(it) } }
         scope.launch { app.learning.state.collect { refreshCandidates() } }
-        scope.launch { app.settings.state.collect {
+        scope.launch {
+            app.settings.awaitLoaded()
+            mediaHistory=app.clipboardMedia.restoreHistory()
+            app.settings.state.collect {
             if (!it.clipboardHistory) clearMediaHistory()
             if (it.clipboardHistory && !clipboardHistoryWasEnabled) {
                 previewTimestamp=-1L
+                captureClipboard()
                 refreshClipboardPreview()
             }
             clipboardHistoryWasEnabled=it.clipboardHistory
@@ -1115,6 +1120,7 @@ class DualKeyService : InputMethodService() {
         fun current()=previewTimestamp==timestamp && session==editorSession && windowShown && clipboardEligible() &&
             runCatching { clipboardManager.primaryClipDescription?.timestamp }.getOrNull()==timestamp
         clipboardPreviewJob=scope.launch {
+            var shown=false
             try {
                 val (uri,mime)=withContext(Dispatchers.IO) { app.clipboardMedia.description(clip) } ?: return@launch
                 if (!current()) return@launch
@@ -1125,20 +1131,25 @@ class DualKeyService : InputMethodService() {
                     mime.startsWith("video/") -> "動画"
                     else -> "画像"
                 }
-                if (timestamp!=dismissedPreview) ui?.showClipboardPreview(thumbnail,"コピーした${kind}を貼り付け",{
-                    if (current()) {
+                if (timestamp!=dismissedPreview) {
+                    shown=ui!=null
+                    ui?.showClipboardPreview(thumbnail,"コピーした${kind}を貼り付け",{
+                        if (current()) {
+                            dismissedPreview=timestamp
+                            ui?.showClipboardPreview(null,null)
+                            pasteClipboardMedia(clip)
+                        }
+                    },{
                         dismissedPreview=timestamp
                         ui?.showClipboardPreview(null,null)
-                        pasteClipboardMedia(clip)
-                    }
-                },{
-                    dismissedPreview=timestamp
-                    ui?.showClipboardPreview(null,null)
-                })
+                    })
+                }
             } catch (e: CancellationException) {
                 throw e
             } catch (_: Exception) {
                 // An expired clipboard grant or quota must not interrupt typing.
+            } finally {
+                if (!shown && previewTimestamp==timestamp && clipboardPreviewJob===currentCoroutineContext()[Job]) previewTimestamp=-1L
             }
         }
     }
@@ -1148,10 +1159,12 @@ class DualKeyService : InputMethodService() {
         val entries=(listOf(entry)+currentMedia()).sortedByDescending { it.copiedAt }
         mediaHistory=entries.take(settings.clipboardLimit)
         if (entry !in mediaHistory) return false
+        app.clipboardMedia.saveHistory(mediaHistory)
         if (clipboardShowing) clipboardHistory()
         scope.launch {
             delay((entry.media.expires-System.currentTimeMillis()).coerceAtLeast(0L))
             mediaHistory=mediaHistory.filterNot { it.media==entry.media }
+            app.clipboardMedia.saveHistory(mediaHistory)
             if (clipboardShowing) clipboardHistory()
         }
         return true
@@ -1336,6 +1349,7 @@ class DualKeyService : InputMethodService() {
         mediaHistoryEpoch++
         mediaHistory.forEach { app.clipboardMedia.discard(it.media) }
         mediaHistory=emptyList()
+        app.clipboardMedia.saveHistory(emptyList())
     }
     private fun toggleMediaPin(entry: MediaHistoryEntry) {
         if (!clipboardEligible() || !settings.clipboardHistory) return
@@ -1380,6 +1394,7 @@ class DualKeyService : InputMethodService() {
                 if (entry.pinned) app.clipboardMedia.unpin(entry)
                 val removed=mediaHistory.filter { it.copiedAt==entry.copiedAt }
                 mediaHistory=mediaHistory-removed.toSet()
+                app.clipboardMedia.saveHistory(mediaHistory)
                 removed.forEach { app.clipboardMedia.discard(it.media) }
                 clipboardHistory()
             },

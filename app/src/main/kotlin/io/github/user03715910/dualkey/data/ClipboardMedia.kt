@@ -36,6 +36,34 @@ class ClipboardMedia(private val context: Context,private val scope: CoroutineSc
     private val maxItem=32L*1024*1024
     private val maxTotal=64L*1024*1024
     private val staging=mutableSetOf<File>()
+    private val historyPrefs=context.getSharedPreferences("clipboard-media-history",Context.MODE_PRIVATE)
+
+    /** Restore only our staged files, within the original opt-in retention period. */
+    fun restoreHistory(): List<MediaHistoryEntry> = runCatching {
+        val now=System.currentTimeMillis()
+        val json=JSONArray(historyPrefs.getString("entries","[]"))
+        (0 until minOf(json.length(),100)).mapNotNull { i ->
+            val item=json.getJSONObject(i)
+            val name=item.getString("file")
+            val file=File(directory,name)
+            val mime=item.getString("mime")
+            val expires=item.getLong("expires")
+            if (name!=file.name || file.parentFile!=directory || !file.isFile ||
+                file.length() !in 1..maxItem || !isMedia(mime) || expires-now !in 1L..3_600_000L) null
+            else MediaHistoryEntry(SharedMedia(file,FileProvider.getUriForFile(context,authority,file),mime,expires),
+                null,item.getLong("time"))
+        }.distinctBy { it.copiedAt }.sortedByDescending { it.copiedAt }
+    }.getOrDefault(emptyList())
+
+    fun saveHistory(entries: List<MediaHistoryEntry>) {
+        val json=JSONArray()
+        entries.filter { !it.pinned && it.media.file.parentFile==directory &&
+            System.currentTimeMillis()<it.media.expires }.take(100).forEach {
+            json.put(JSONObject().put("file",it.media.file.name).put("mime",it.media.mime)
+                .put("expires",it.media.expires).put("time",it.copiedAt))
+        }
+        historyPrefs.edit().putString("entries",json.toString()).apply()
+    }
 
     private val pinnedDirectory=File(context.filesDir,"ime-pinned")
     private val pinnedPrefs=context.getSharedPreferences("pinned-clipboard-media",Context.MODE_PRIVATE)
@@ -102,14 +130,21 @@ class ClipboardMedia(private val context: Context,private val scope: CoroutineSc
     fun discard(media: SharedMedia) { scope.launch(Dispatchers.IO) { mutex.withLock { delete(media.file) } } }
 
     fun description(clip: ClipData): Pair<Uri, String>? {
-        val uri=if (clip.itemCount>0) clip.getItemAt(0).uri else null
-        if (uri?.scheme!="content" || uri.authority.isNullOrEmpty() || uri.authority==authority ||
-            uri.authority==context.packageName+".updates") return null
-        val mime=resolver.getType(uri)?.substringBefore(';')?.trim()?.lowercase() ?: return null
-        if (!isMedia(mime) || (!hasGenericUriType(clip.description) && (0 until clip.description.mimeTypeCount).none {
-                ClipDescription.compareMimeTypes(mime,clip.description.getMimeType(it))
-            })) return null
-        return uri to mime
+        val declared=(0 until clip.description.mimeTypeCount).map { clip.description.getMimeType(it) }
+        for (i in 0 until clip.itemCount) {
+            val uri=clip.getItemAt(i).uri ?: continue
+            if (uri.scheme!="content" || uri.authority.isNullOrEmpty() || uri.authority==authority ||
+                uri.authority==context.packageName+".updates") continue
+            val type=runCatching { resolver.getType(uri)?.substringBefore(';')?.trim()?.lowercase() }
+            if (type.isFailure) continue
+            // Some providers omit getType but supply a concrete type on the clip.
+            // Never override a provider's explicitly non-media or mismatching type.
+            val mime=type.getOrNull() ?: declared.filter(::isMedia).distinct().singleOrNull() ?: continue
+            if (!isMedia(mime) || (!hasGenericUriType(clip.description) &&
+                declared.none { ClipDescription.compareMimeTypes(mime,it) })) continue
+            return uri to mime
+        }
+        return null
     }
 
     suspend fun stage(uri: Uri,mime: String,minutes: Int = 10): SharedMedia = withContext(Dispatchers.IO) {
@@ -182,10 +217,9 @@ class ClipboardMedia(private val context: Context,private val scope: CoroutineSc
             description.hasMimeType("text/uri-list") || description.hasMimeType("application/octet-stream")
 
         fun mayContainMedia(clip: ClipData): Boolean {
-            if (clip.itemCount==0) return false
-            val item=clip.getItemAt(0)
-            return item.uri?.scheme=="content" && (clip.description.hasMimeType("image/*") ||
-                clip.description.hasMimeType("video/*") || (item.text==null && hasGenericUriType(clip.description)))
+            val description=clip.description
+            return (description.hasMimeType("image/*") || description.hasMimeType("video/*") ||
+                hasGenericUriType(description)) && (0 until clip.itemCount).any { clip.getItemAt(it).uri?.scheme=="content" }
         }
 
 
