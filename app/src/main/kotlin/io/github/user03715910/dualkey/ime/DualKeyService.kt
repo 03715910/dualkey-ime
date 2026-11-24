@@ -174,6 +174,7 @@ class DualKeyService : InputMethodService() {
         scope.launch {
             app.settings.awaitLoaded()
             mediaHistory=app.clipboardMedia.restoreHistory()
+            mediaHistory.forEach(::watchMediaExpiry)
             app.settings.state.collect {
             if (!it.clipboardHistory) clearMediaHistory()
             if (it.clipboardHistory && !clipboardHistoryWasEnabled) {
@@ -1161,13 +1162,17 @@ class DualKeyService : InputMethodService() {
         if (entry !in mediaHistory) return false
         app.clipboardMedia.saveHistory(mediaHistory)
         if (clipboardShowing) clipboardHistory()
+        watchMediaExpiry(entry)
+        return true
+    }
+    private fun watchMediaExpiry(entry: MediaHistoryEntry) {
         scope.launch {
             delay((entry.media.expires-System.currentTimeMillis()).coerceAtLeast(0L))
             mediaHistory=mediaHistory.filterNot { it.media==entry.media }
             app.clipboardMedia.saveHistory(mediaHistory)
+            app.clipboardMedia.discard(entry.media)
             if (clipboardShowing) clipboardHistory()
         }
-        return true
     }
 
     private fun pasteText(text: String) {
