@@ -1,6 +1,22 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 45,
+    "versionName": "0.1.42",
+    "releaseDate": "2026-11-24",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.42/DualKeyIME-0.1.42.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "6d115d22f8a11d18cdde16de5263a020994f431a0acc6b17ee51f4c4fdd9eaf5",
+    "sizeBytes": 102360424,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "アプリのホームと設定に「使い方ガイド」を追加しました。",
+      "初期設定・文字入力・変換・貼り付け・物理キーボードなどの操作を、画面写真付きで確認できます。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 44,
     "versionName": "0.1.41",
     "releaseDate": "2026-11-24",

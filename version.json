@@ -1,17 +1,16 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 44,
-  "versionName": "0.1.41",
+  "versionCode": 45,
+  "versionName": "0.1.42",
   "releaseDate": "2026-11-24",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.41/DualKeyIME-0.1.41.apk",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.42/DualKeyIME-0.1.42.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "e8844e57c63c7238156d5d7654bf979c50054dd26af76ec3c7e895f707fe5604",
-  "sizeBytes": 101804123,
+  "sha256": "6d115d22f8a11d18cdde16de5263a020994f431a0acc6b17ee51f4c4fdd9eaf5",
+  "sizeBytes": 102360424,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "文字の代替表記付きの画像コピーや、複数データに含まれる画像を判定できるよう改善しました。",
-    "保存期間内の画像・動画履歴をIME再起動後も復元します。固定した履歴は従来どおり期限なしで利用できます。",
-    "画像プレビューの取得に失敗した後も、履歴を開くなどの操作で再取得できるよう修正しました。"
+    "アプリのホームと設定に「使い方ガイド」を追加しました。",
+    "初期設定・文字入力・変換・貼り付け・物理キーボードなどの操作を、画面写真付きで確認できます。"
   ]
 }
