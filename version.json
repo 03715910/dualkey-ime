@@ -1,16 +1,17 @@
 {
   "packageName": "io.github.user03715910.dualkey",
-  "versionCode": 43,
-  "versionName": "0.1.40",
+  "versionCode": 44,
+  "versionName": "0.1.41",
   "releaseDate": "2026-11-24",
-  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.40/DualKeyIME-0.1.40.apk",
+  "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.41/DualKeyIME-0.1.41.apk",
   "websiteUrl": "https://03715910.github.io/dualkey-ime/",
-  "sha256": "b10aa745534a0102452221e2001743e8793dabbdcc1ded401968b64898d4dda6",
+  "sha256": "e8844e57c63c7238156d5d7654bf979c50054dd26af76ec3c7e895f707fe5604",
   "sizeBytes": 101804123,
   "minSdk": 26,
   "required": false,
   "releaseNotes": [
-    "削除キーの左フリックで、カーソルより前だけを一括削除するよう変更しました。",
-    "範囲選択中は選択部分と後ろの文字を残します。入力欄の先頭では文字を削除しません。"
+    "文字の代替表記付きの画像コピーや、複数データに含まれる画像を判定できるよう改善しました。",
+    "保存期間内の画像・動画履歴をIME再起動後も復元します。固定した履歴は従来どおり期限なしで利用できます。",
+    "画像プレビューの取得に失敗した後も、履歴を開くなどの操作で再取得できるよう修正しました。"
   ]
 }
