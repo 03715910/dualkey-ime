@@ -1,6 +1,22 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 46,
+    "versionName": "0.1.43",
+    "releaseDate": "2026-11-24",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.43/DualKeyIME-0.1.43.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "b799d7743190310ba2e283bc4aaabbdba33354bf614d5c0779c91cdef82f0d70",
+    "sizeBytes": 102360424,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "物理キーボード接続中に「キーボードを表示」の通知を消しても、カーソル移動や入力で再表示できるようにしました。",
+      "通知がオフ、またはAndroidの通知設定でブロックされている場合に、設定画面で状態と許可への案内を表示します。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 45,
     "versionName": "0.1.42",
     "releaseDate": "2026-11-24",
