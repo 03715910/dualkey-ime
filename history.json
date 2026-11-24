@@ -1,6 +1,22 @@
 [
   {
     "packageName": "io.github.user03715910.dualkey",
+    "versionCode": 43,
+    "versionName": "0.1.40",
+    "releaseDate": "2026-11-24",
+    "apkUrl": "https://github.com/03715910/dualkey-ime/releases/download/v0.1.40/DualKeyIME-0.1.40.apk",
+    "websiteUrl": "https://03715910.github.io/dualkey-ime/",
+    "sha256": "b10aa745534a0102452221e2001743e8793dabbdcc1ded401968b64898d4dda6",
+    "sizeBytes": 101804123,
+    "minSdk": 26,
+    "required": false,
+    "releaseNotes": [
+      "削除キーの左フリックで、カーソルより前だけを一括削除するよう変更しました。",
+      "範囲選択中は選択部分と後ろの文字を残します。入力欄の先頭では文字を削除しません。"
+    ]
+  },
+  {
+    "packageName": "io.github.user03715910.dualkey",
     "versionCode": 42,
     "versionName": "0.1.39",
     "releaseDate": "2026-11-23",
