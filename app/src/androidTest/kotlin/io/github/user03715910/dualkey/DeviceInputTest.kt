@@ -332,17 +332,39 @@ class DeviceInputTest {
         hold(rect("⌫")); assertEquals("あ。い、後ろ",inputText())
         main { editor.setSelection(0,2) }; hold(rect("⌫")); assertEquals("い、後ろ",inputText())
     }
-    @Test fun deleteLeftFlickClearsTheEntireFieldAcrossTheCursorAndSelection() {
-        val text="前".repeat(2200)+"🙂\n"+"後".repeat(2200)
-        resetPunctuationEditor(text,InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
-        main { editor.setSelection(2200,2202) }
+    @Test fun deleteLeftFlickPreservesSelectedTextAndEverythingAfterIt() {
+        val prefix="前".repeat(2200)+"🙂\n"
+        val selection="選択🙂"
+        val suffix="\n"+"後".repeat(2200)
+        val text=prefix+selection+suffix
         val distance=(activity.resources.displayMetrics.density*70).toInt()
-        touch(rect("⌫"),dy=-distance)
-        assertEquals("An upward flick leaves the input intact",text,inputText())
-        touch(rect("⌫"),dx=-distance)
-        await("all text cleared on both sides of the selection") { inputText().isEmpty() }
-        touch(rect("⌫"),dx=-distance)
-        assertEquals("",inputText())
+        for (reverse in listOf(false,true)) {
+            resetPunctuationEditor(text,InputType.TYPE_CLASS_TEXT or InputType.TYPE_TEXT_FLAG_MULTI_LINE)
+            main { if (reverse) editor.setSelection(prefix.length+selection.length,prefix.length)
+                else editor.setSelection(prefix.length,prefix.length+selection.length) }
+            touch(rect("⌫"),dy=-distance)
+            assertEquals("An upward flick leaves the input intact",text,inputText())
+            touch(rect("⌫"),dx=-distance)
+            await("only the prefix is deleted, including with reversed selection") { inputText()==selection+suffix }
+            main {
+                assertEquals(0,minOf(editor.selectionStart,editor.selectionEnd))
+                assertEquals(selection.length,maxOf(editor.selectionStart,editor.selectionEnd))
+            }
+            touch(rect("⌫"),dx=-distance)
+            assertEquals("Nothing before the selection remains to delete",selection+suffix,inputText())
+        }
+    }
+    @Test fun deleteLeftFlickDeletesOnlyThePrefixAtTheStartMiddleAndEnd() {
+        val prefix="前🙂\nの文章。"
+        val text=prefix+"後ろ🙌の文章。"
+        val distance=(activity.resources.displayMetrics.density*70).toInt()
+        for (position in listOf(0,prefix.length,text.length)) {
+            resetPunctuationEditor(text)
+            main { editor.setSelection(position) }
+            touch(rect("⌫"),dx=-distance)
+            assertEquals("Keep every character from the cursor onward",text.substring(position),inputText())
+            main { assertEquals(0,editor.selectionStart); assertEquals(0,editor.selectionEnd) }
+        }
     }
     @Test fun deleteLeftFlickClearsBothConfirmedAndComposingText() {
         resetPunctuationEditor("確定済み。")
@@ -353,6 +375,74 @@ class DeviceInputTest {
         await("whole field cleared with composition active") { inputText().isEmpty() }
         touch(rect("あ行"))
         assertEquals("あ",inputText())
+    }
+    @Test fun deleteLeftFlickKeepsTheSuffixDuringJapaneseConversionAndEnglishComposition() {
+        val prefix="確定済み🙂。"
+        val suffix="後ろ🙌の文章。"
+        val distance=(activity.resources.displayMetrics.density*70).toInt()
+        resetPunctuationEditor(prefix+suffix)
+        main { editor.setSelection(prefix.length) }
+        letters("KYOU"); key(KeyEvent.KEYCODE_SPACE)
+        await("Japanese conversion in the middle") { inputText()==prefix+"今日"+suffix }
+        touch(rect("⌫"),dx=-distance)
+        assertEquals(suffix,inputText())
+        main { assertEquals(-1,android.view.inputmethod.BaseInputConnection.getComposingSpanStart(editor.text)) }
+        touch(rect("あ行")); assertEquals("あ"+suffix,inputText())
+        resetPunctuationEditor(prefix+suffix)
+        main { editor.setSelection(prefix.length) }
+        touch(rect("英語に切り替え"))
+        letters("HEL"); assertEquals(prefix+"hel"+suffix,inputText())
+        touch(rect("⌫"),dx=-distance)
+        assertEquals(suffix,inputText())
+        touch(rect("a")); assertEquals("a"+suffix,inputText())
+    }
+    private fun deletionEditorWithExtractedPosition(reportsPosition: Boolean) {
+        main {
+            editor=object : EditText(activity) {
+                override fun onCreateInputConnection(outAttrs: EditorInfo): android.view.inputmethod.InputConnection? {
+                    val connection=super.onCreateInputConnection(outAttrs) ?: return null
+                    return object : android.view.inputmethod.InputConnectionWrapper(connection,false) {
+                        override fun getSurroundingText(beforeLength: Int,afterLength: Int,flags: Int): android.view.inputmethod.SurroundingText? = null
+                        override fun getExtractedText(request: android.view.inputmethod.ExtractedTextRequest,flags: Int): android.view.inputmethod.ExtractedText? {
+                            if (!reportsPosition) return null
+                            val extracted=super.getExtractedText(request,flags) ?: return null
+                            // A valid editor may report only a slice, with positions relative to it.
+                            val cut=minOf(extracted.selectionStart,extracted.selectionEnd).coerceAtLeast(0)
+                            extracted.text=extracted.text.subSequence(cut,extracted.text.length)
+                            extracted.startOffset+=cut
+                            extracted.selectionStart-=cut; extracted.selectionEnd-=cut
+                            return extracted
+                        }
+                    }
+                }
+            }.apply { id=View.generateViewId(); inputType=InputType.TYPE_CLASS_TEXT }
+            activity.addContentView(editor,android.view.ViewGroup.LayoutParams(-1,(80*activity.resources.displayMetrics.density).toInt()))
+            assertTrue(editor.requestFocus())
+            ImeControl.request(DisplayMode.FULL)
+            activity.getSystemService(InputMethodManager::class.java).restartInput(editor)
+            activity.getSystemService(InputMethodManager::class.java).showSoftInput(editor,0)
+        }
+        await("replacement editor ready") { "fieldId=${editor.id}\n" in diagnostic().replace("\r\n","\n") && imeHeight()>300 }
+    }
+    @Test fun deleteLeftFlickUsesTheAbsoluteOffsetOfPartialExtractedText() {
+        deletionEditorWithExtractedPosition(true)
+        val prefix="前🙂".repeat(800)
+        resetPunctuationEditor(prefix+"選択後ろ")
+        main { editor.setSelection(prefix.length,prefix.length+2) }
+        val distance=(activity.resources.displayMetrics.density*70).toInt()
+        touch(rect("⌫"),dx=-distance)
+        assertEquals("選択後ろ",inputText())
+        main { assertEquals(0,editor.selectionStart); assertEquals(2,editor.selectionEnd) }
+    }
+    @Test fun deleteLeftFlickDoesNotGuessWhenTheEditorCannotReportItsPosition() {
+        deletionEditorWithExtractedPosition(false)
+        val original="前🙂選択後ろ"
+        resetPunctuationEditor(original)
+        main { editor.setSelection(3,5) }
+        val distance=(activity.resources.displayMetrics.density*70).toInt()
+        touch(rect("⌫"),dx=-distance)
+        assertEquals(original,inputText())
+        main { assertEquals(3,editor.selectionStart); assertEquals(5,editor.selectionEnd) }
     }
     @Test fun reconversionReplacesOnlyTheSelectedCommittedText() {
         val before="前🙂"

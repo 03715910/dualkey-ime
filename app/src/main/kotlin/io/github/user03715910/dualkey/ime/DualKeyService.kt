@@ -1005,16 +1005,20 @@ class DualKeyService : InputMethodService() {
         } finally { connection.endBatchEdit() }
         refreshCandidates()
     }
-    private fun deleteAllText() {
+    private fun deleteBeforeCursor() {
         if (!hasEditor()) return
         val connection=currentInputConnection ?: return
+        val before=selectionBounds(connection)?.let { minOf(it.first,it.second) }
+        if (before==null || before<0) {
+            Toast.makeText(this,"この入力欄では位置を取得できないため、一括削除できません。",Toast.LENGTH_SHORT).show()
+            return
+        }
         clearState()
         connection.beginBatchEdit()
         try {
-            // Leaving a composing span active would make commitText replace
-            // that span instead of the editor's select-all range.
-            connection.finishComposingText()
-            if (connection.performContextMenuAction(android.R.id.selectAll)) connection.commitText("",1)
+            // Use the editor's current absolute position, not cached selection reports
+            // or a bounded text preview. Leave the selection and its entire suffix intact.
+            if (connection.finishComposingText() && before>0) connection.deleteSurroundingText(before,0)
         } finally { connection.endBatchEdit() }
         refreshCandidates()
     }
@@ -1467,7 +1471,7 @@ class DualKeyService : InputMethodService() {
             "enter" -> enter()
             "delete" -> delete()
             "delete_chunk" -> deleteChunk()
-            "delete_all" -> deleteAllText()
+            "delete_all" -> deleteBeforeCursor()
             "cursor_left" -> moveCursor(-1)
             "cursor_right" -> moveCursor(1)
             "modify" -> modifyKana()

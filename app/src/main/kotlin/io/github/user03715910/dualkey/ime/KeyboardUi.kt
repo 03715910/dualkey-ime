@@ -163,7 +163,7 @@ class KeyboardUi(private val context: Context, private val callback: (String) ->
         isClickable = true
         if (action=="delete") {
             contentDescription=description
-            ViewCompat.addAccessibilityAction(this,"入力欄を一括削除") { _,_ -> callback("delete_all"); true }
+            ViewCompat.addAccessibilityAction(this,"カーソルより前を一括削除") { _,_ -> callback("delete_all"); true }
             setOnLongClickListener { callback("delete_chunk"); true }
         } else {
             setOnClickListener { feedback(this); callback(action) }
